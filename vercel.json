@@ -1,0 +1,10 @@
+{
+  "routes": [
+    { "src": "/_not-found", "dest": "/custom-404.html" },
+    { "src": "/404", "dest": "/custom-404.html" },
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "status": 404, "dest": "/custom-404.html" }
+  ],
+  "buildCommand": "NODE_OPTIONS='--max_old_space_size=4096' next build && cp -r public/* .next/",
+  "outputDirectory": ".next"
+}

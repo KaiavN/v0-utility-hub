@@ -1,0 +1,227 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Critical CSS first */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+
+    --radius: 0.5rem;
+
+    /* Theme color variables */
+    --theme-primary: var(--primary);
+    --theme-primary-light: rgba(59, 130, 246, 0.2);
+    --theme-primary-dark: #1e40af;
+  }
+
+  /* Theme color definitions */
+  [data-theme-color="blue"] {
+    --theme-primary: #2563eb;
+    --theme-primary-light: rgba(37, 99, 235, 0.2);
+    --theme-primary-dark: #1d4ed8;
+  }
+
+  [data-theme-color="green"] {
+    --theme-primary: #16a34a;
+    --theme-primary-light: rgba(22, 163, 74, 0.2);
+    --theme-primary-dark: #15803d;
+  }
+
+  [data-theme-color="red"] {
+    --theme-primary: #dc2626;
+    --theme-primary-light: rgba(220, 38, 38, 0.2);
+    --theme-primary-dark: #b91c1c;
+  }
+
+  [data-theme-color="purple"] {
+    --theme-primary: #9333ea;
+    --theme-primary-light: rgba(147, 51, 234, 0.2);
+    --theme-primary-dark: #7e22ce;
+  }
+
+  [data-theme-color="orange"] {
+    --theme-primary: #ea580c;
+    --theme-primary-light: rgba(234, 88, 12, 0.2);
+    --theme-primary-dark: #c2410c;
+  }
+
+  [data-theme-color="teal"] {
+    --theme-primary: #0891b2;
+    --theme-primary-light: rgba(8, 145, 178, 0.2);
+    --theme-primary-dark: #0e7490;
+  }
+
+  [data-theme-color="pink"] {
+    --theme-primary: #db2777;
+    --theme-primary-light: rgba(219, 39, 119, 0.2);
+    --theme-primary-dark: #be185d;
+  }
+
+  [data-theme-color="indigo"] {
+    --theme-primary: #4f46e5;
+    --theme-primary-light: rgba(79, 70, 229, 0.2);
+    --theme-primary-dark: #4338ca;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Ensure font size is properly inherited */
+  html {
+    font-size: 100%; /* Default base font size */
+    text-size-adjust: 100%; /* Prevent auto text size adjustment */
+  }
+
+  /* All elements should inherit font size from their parent */
+  *,
+  *::before,
+  *::after {
+    font-size: inherit;
+  }
+}
+
+/* Apply theme colors to components */
+.bg-primary {
+  background-color: var(--theme-primary) !important;
+}
+
+.text-primary {
+  color: var(--theme-primary) !important;
+}
+
+.border-primary {
+  border-color: var(--theme-primary) !important;
+}
+
+.ring-primary {
+  --tw-ring-color: var(--theme-primary) !important;
+}
+
+.from-primary\/10 {
+  --tw-gradient-from: var(--theme-primary-light) !important;
+}
+
+.to-primary\/5 {
+  --tw-gradient-to: var(--theme-primary-light) !important;
+}
+
+.border-primary\/20 {
+  border-color: var(--theme-primary-light) !important;
+}
+
+/* Add content-visibility for better rendering performance */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 500px; /* Provide size hint */
+}
+
+/* Add utility classes for text balance */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Add utility for content-visibility */
+  .content-visibility-auto {
+    content-visibility: auto;
+  }
+
+  /* Add utility for contain-intrinsic-size */
+  .contain-size-sm {
+    contain-intrinsic-size: 0 100px;
+  }
+
+  .contain-size-md {
+    contain-intrinsic-size: 0 300px;
+  }
+
+  .contain-size-lg {
+    contain-intrinsic-size: 0 500px;
+  }
+}
+
+/* Optimize loading of non-critical elements */
+@media (prefers-reduced-motion: no-preference) {
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-in;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+/* Optimize for print */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
