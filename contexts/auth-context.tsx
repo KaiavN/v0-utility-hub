@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from "
 import { toast } from "@/components/ui/use-toast"
 import { createClient } from "@supabase/supabase-js"
 import { useRouter } from "next/navigation"
+import { clientConfig } from "@/lib/client-config"
 
 // Simplified User type
 type User = {
@@ -125,6 +126,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // Get the correct site URL
+  const getSiteUrl = () => {
+    // Use the APP_URL from environment variables if available
+    if (clientConfig.appUrl) {
+      return clientConfig.appUrl.trim().replace(/\/$/, "") // Remove trailing slash if present
+    }
+
+    // Fallback to window.location.origin in the browser
+    if (typeof window !== "undefined") {
+      return window.location.origin
+    }
+
+    // Default fallback (should not reach here in normal circumstances)
+    return "https://utilhub.vercel.app"
+  }
+
   // GitHub authentication function
   const loginWithGitHub = async (): Promise<void> => {
     try {
@@ -135,10 +152,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
       }
 
+      const siteUrl = getSiteUrl()
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${siteUrl}/auth/callback`,
+          queryParams: {
+            redirect_to: `${siteUrl}/auth/callback`,
+          },
         },
       })
 
@@ -172,10 +194,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
       }
 
+      const siteUrl = getSiteUrl()
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${siteUrl}/auth/callback`,
+          queryParams: {
+            redirect_to: `${siteUrl}/auth/callback`,
+          },
         },
       })
 

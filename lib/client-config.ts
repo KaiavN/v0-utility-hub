@@ -13,6 +13,8 @@ export const clientConfig = {
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || "",
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
 
-  // App URL
-  appUrl: process.env.NEXT_PUBLIC_APP_URL || "",
+  // App URL - use the deployed URL in production, localhost in development
+  appUrl:
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.NODE_ENV === "development" ? "http://localhost:3000" : "https://utilhub.vercel.app"),
 }
