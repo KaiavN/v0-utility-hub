@@ -2,6 +2,10 @@
  * Utility functions for exporting and importing all local storage data
  */
 
+// Import the helper functions
+import { eventBus } from "./event-bus"
+import { flushLocalStorageWrites } from "./local-storage"
+
 // List of all localStorage keys used in the application
 const ALL_KEYS = [
   "tasks",
@@ -22,35 +26,22 @@ const ALL_KEYS = [
   "countdownTimers",
   "contacts",
   "contactGroups",
-  "onboarding-complete",
+  "plannerData", // Ensure plannerData is included
+  "markdownDocuments",
+  "eventTimers",
+  "financeData",
+  // UI settings
   "theme",
   "themeMode",
   "sidebar-menu-collapsed",
   "sidebar-rail-collapsed",
   "sidebar-menu-width",
   "sidebar-rail-width",
-  "sidebar-inset",
-  "sidebar-header",
-  "sidebar-footer",
-  "sidebar-search",
-  "sidebar-nav",
-  "sidebar-rail",
-  "sidebar-menu",
-  "sidebar-menu-button",
-  "sidebar-menu-item",
-  "sidebar-group",
-  "sidebar-group-label",
-  "sidebar-group-content",
-  "sidebar-input",
-  "sidebar-trigger",
-  "sidebar-provider",
-  "sidebar-inset",
-  "sidebar",
-  "kanbanBoard",
-  "financeData",
-  "markdownDocuments",
-  "eventTimers",
+  "onboarding-complete",
 ]
+
+// Critical data keys that need special handling
+const CRITICAL_DATA_KEYS = ["plannerData", "markdownDocuments", "recipes", "contacts", "tasks"]
 
 // Safely get data from localStorage with error handling
 function safeGetItem(key: string): any {
@@ -81,57 +72,197 @@ function safeSetItem(key: string, value: any): boolean {
   }
 }
 
+// Backup critical data before export/import operations
+function backupCriticalData(): Record<string, any> {
+  const backup: Record<string, any> = {}
+
+  CRITICAL_DATA_KEYS.forEach((key) => {
+    try {
+      const data = safeGetItem(key)
+      if (data !== null) {
+        backup[key] = data
+        console.log(`Backed up ${key} data`)
+      }
+    } catch (error) {
+      console.error(`Failed to backup ${key}:`, error)
+    }
+  })
+
+  return backup
+}
+
+// Restore critical data if needed
+function restoreCriticalData(backup: Record<string, any>): void {
+  Object.entries(backup).forEach(([key, value]) => {
+    try {
+      if (safeGetItem(key) === null && value !== null) {
+        console.log(`Restoring ${key} from backup`)
+        safeSetItem(key, value)
+
+        // Notify the application about the restored data
+        if (key === "plannerData") {
+          eventBus.publish("data:plannerData:updated", value)
+          eventBus.publish("data:updated", { collection: "plannerData" })
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to restore ${key}:`, error)
+    }
+  })
+}
+
+// Validate planner data structure
+function validatePlannerData(data: any): boolean {
+  if (!data) return false
+
+  // Check for required properties
+  if (!data.blocks || !Array.isArray(data.blocks)) {
+    console.error("Planner data blocks is not an array")
+    return false
+  }
+
+  if (!data.settings || typeof data.settings !== "object") {
+    console.error("Planner data settings is not an object")
+    return false
+  }
+
+  if (!data.stats || typeof data.stats !== "object") {
+    console.error("Planner data stats is not an object")
+    return false
+  }
+
+  return true
+}
+
+// Create default planner data
+function createDefaultPlannerData() {
+  return {
+    blocks: [],
+    settings: {
+      dayStartHour: 6,
+      dayEndHour: 22,
+      timeSlotHeight: 80,
+      defaultBlockDuration: 60,
+      categories: [
+        { id: "work", name: "Work", color: "bg-blue-500" },
+        { id: "personal", name: "Personal", color: "bg-green-500" },
+        { id: "health", name: "Health & Fitness", color: "bg-red-500" },
+        { id: "learning", name: "Learning", color: "bg-purple-500" },
+        { id: "social", name: "Social", color: "bg-yellow-500" },
+        { id: "other", name: "Other", color: "bg-gray-500" },
+      ],
+      templates: [],
+      showCompletedBlocks: true,
+    },
+    stats: {
+      totalTimeBlocked: 0,
+      completedBlocks: 0,
+      streak: 0,
+      lastActiveDate: null,
+    },
+  }
+}
+
 // Optimize the exportAllData function for better performance
 export function exportAllData(): Promise<void> {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     try {
+      console.log("Starting data export process...")
+
+      // Force immediate save of any pending data
+      if (typeof flushLocalStorageWrites === "function") {
+        flushLocalStorageWrites()
+      }
+
+      // Backup critical data before export
+      const criticalDataBackup = backupCriticalData()
+
       // Create an object with all localStorage data
       const allData: Record<string, any> = {}
+
+      // Special handling for plannerData to ensure it's properly exported
+      if (typeof window !== "undefined") {
+        try {
+          const rawPlannerData = window.localStorage.getItem("plannerData")
+          if (rawPlannerData) {
+            try {
+              const plannerData = JSON.parse(rawPlannerData)
+              console.log(
+                "Found plannerData for export with",
+                plannerData.blocks ? plannerData.blocks.length : 0,
+                "blocks",
+              )
+              // Force an immediate save to ensure data is up to date
+              window.localStorage.setItem("plannerData", rawPlannerData)
+            } catch (parseError) {
+              console.error("Error parsing plannerData during export:", parseError)
+            }
+          }
+        } catch (error) {
+          console.error("Error accessing plannerData during export:", error)
+        }
+      }
+
       let hasData = false
 
-      // Use a more efficient approach to collect data
-      const promises = ALL_KEYS.map(async (key) => {
-        const value = safeGetItem(key)
-        if (value !== null) {
-          allData[key] = value
-          hasData = true
+      // Process all keys
+      for (const key of ALL_KEYS) {
+        try {
+          const value = safeGetItem(key)
+          if (value !== null) {
+            allData[key] = value
+            hasData = true
+
+            // Special handling for plannerData
+            if (key === "plannerData") {
+              console.log("Found plannerData for export:", value ? "data present" : "no data")
+
+              // Validate planner data structure
+              if (!validatePlannerData(value)) {
+                console.warn("Planner data structure is invalid, using default")
+                allData[key] = createDefaultPlannerData()
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`Error getting ${key} for export:`, error)
         }
-      })
+      }
 
-      // Process all keys in parallel
-      Promise.all(promises)
-        .then(() => {
-          if (!hasData) {
-            alert("No data found to export.")
-            resolve()
-            return
-          }
+      if (!hasData) {
+        alert("No data found to export.")
+        resolve()
+        return
+      }
 
-          // Add metadata to help with validation during import
-          allData._metadata = {
-            exportDate: new Date().toISOString(),
-            appVersion: "1.0.0",
-            dataFormat: "utility-hub-export-v1",
-          }
+      // Add metadata to help with validation during import
+      allData._metadata = {
+        exportDate: new Date().toISOString(),
+        appVersion: "1.0.0",
+        dataFormat: "utility-hub-export-v1",
+      }
 
-          // Convert to JSON string
-          const jsonData = JSON.stringify(allData, null, 2)
+      // Convert to JSON string
+      const jsonData = JSON.stringify(allData, null, 2)
 
-          // Create a blob and download link
-          const blob = new Blob([jsonData], { type: "application/json" })
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement("a")
-          a.href = url
-          a.download = `utility-hub-data-${new Date().toISOString().split("T")[0]}.json`
+      // Create a blob and download link
+      const blob = new Blob([jsonData], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `utility-hub-data-${new Date().toISOString().split("T")[0]}.json`
 
-          // Use a more efficient approach to trigger download
-          document.body.appendChild(a)
-          a.click()
-          document.body.removeChild(a)
-          URL.revokeObjectURL(url)
-          resolve()
-        })
-        .catch(reject)
+      // Use a more efficient approach to trigger download
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      // Verify critical data is still intact after export
+      restoreCriticalData(criticalDataBackup)
+
+      console.log("Data export completed successfully")
+      resolve()
     } catch (error) {
       console.error("Failed to export data:", error)
       alert("Failed to export data. See console for details.")
@@ -171,11 +302,16 @@ export function importAllData(file: File, mode: ImportMode = ImportMode.REPLACE)
 
     reader.onload = (event) => {
       // Use setTimeout to prevent ResizeObserver loop errors
-      setTimeout(() => {
+      setTimeout(async () => {
         try {
           if (!event.target?.result) {
             throw new Error("Failed to read file")
           }
+
+          console.log("Starting data import process...")
+
+          // Backup critical data before import
+          const criticalDataBackup = backupCriticalData()
 
           const jsonData = JSON.parse(event.target.result as string) as Record<string, any>
 
@@ -183,6 +319,51 @@ export function importAllData(file: File, mode: ImportMode = ImportMode.REPLACE)
           if (!validateImportData(jsonData)) {
             resolve() // User canceled import after validation warning
             return
+          }
+
+          // Special handling for plannerData during import
+          if (jsonData.plannerData) {
+            console.log(
+              "Found plannerData in import with",
+              jsonData.plannerData.blocks ? jsonData.plannerData.blocks.length : 0,
+              "blocks",
+            )
+
+            // Ensure it's properly structured
+            if (!jsonData.plannerData.blocks) {
+              console.warn("plannerData blocks array is missing, initializing empty array")
+              jsonData.plannerData.blocks = []
+            }
+
+            if (!jsonData.plannerData.settings) {
+              console.warn("plannerData settings object is missing, initializing with defaults")
+              jsonData.plannerData.settings = {
+                dayStartHour: 6,
+                dayEndHour: 22,
+                timeSlotHeight: 80,
+                defaultBlockDuration: 60,
+                categories: [
+                  { id: "work", name: "Work", color: "bg-blue-500" },
+                  { id: "personal", name: "Personal", color: "bg-green-500" },
+                  { id: "health", name: "Health & Fitness", color: "bg-red-500" },
+                  { id: "learning", name: "Learning", color: "bg-purple-500" },
+                  { id: "social", name: "Social", color: "bg-yellow-500" },
+                  { id: "other", name: "Other", color: "bg-gray-500" },
+                ],
+                templates: [],
+                showCompletedBlocks: true,
+              }
+            }
+
+            if (!jsonData.plannerData.stats) {
+              console.warn("plannerData stats object is missing, initializing with defaults")
+              jsonData.plannerData.stats = {
+                totalTimeBlocked: 0,
+                completedBlocks: 0,
+                streak: 0,
+                lastActiveDate: null,
+              }
+            }
           }
 
           if (mode === ImportMode.REPLACE) {
@@ -234,10 +415,27 @@ export function importAllData(file: File, mode: ImportMode = ImportMode.REPLACE)
             // Store the value
             if (safeSetItem(key, value)) {
               successCount++
+
+              // Log when plannerData is successfully imported
+              if (key === "plannerData") {
+                console.log("Successfully imported plannerData")
+
+                // Notify the application about the updated data
+                eventBus.publish("data:plannerData:updated", value)
+                eventBus.publish("data:updated", { collection: "plannerData" })
+              }
             } else {
               errorCount++
+
+              // Log when plannerData import fails
+              if (key === "plannerData") {
+                console.error("Failed to import plannerData")
+              }
             }
           })
+
+          // Verify critical data is still intact after import
+          restoreCriticalData(criticalDataBackup)
 
           if (errorCount > 0) {
             alert(

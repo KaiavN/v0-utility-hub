@@ -1,4 +1,5 @@
 import { performDataEdit } from "./data-editor"
+import { validateDataEditOperation } from "./data-editor"
 import { getDataSchema } from "./data-schemas"
 import type { DataSchema } from "./data-schemas"
 import { eventBus } from "./event-bus"
@@ -9,51 +10,24 @@ export interface DataEditOperation {
   collection: string
   id?: string
   query?: Record<string, any>
-  data?: Record<string, any>
+  data?: any
 }
 
-// Process a data edit operation
-export async function processDataEditOperation(operation: DataEditOperation) {
+// Process a single data edit operation
+export async function processDataEditOperation(
+  operation: DataEditOperation,
+): Promise<{ success: boolean; message: string; data?: any }> {
   try {
     // Validate the operation
-    const validationResult = validateDataEditOperation(operation)
-    if (!validationResult.valid) {
+    const validation = validateDataEditOperation(operation)
+    if (!validation.valid) {
       return {
         success: false,
-        message: `Invalid data edit operation: ${validationResult.message}`,
+        message: validation.message || "Invalid data edit operation",
       }
     }
 
-    // Special handling for contacts to ensure firstName is set
-    if (operation.collection === "contacts" && operation.type === "add" && operation.data) {
-      // Extract name from fullName if available
-      if (operation.data.fullName) {
-        const nameParts = operation.data.fullName.split(" ")
-        if (nameParts.length >= 2) {
-          operation.data.firstName = nameParts[0]
-          operation.data.lastName = nameParts.slice(1).join(" ")
-        } else {
-          operation.data.firstName = operation.data.fullName
-          operation.data.lastName = ""
-        }
-        delete operation.data.fullName
-      } else if (!operation.data.firstName) {
-        // Set default value if no firstName is available
-        operation.data.firstName = "New"
-      }
-
-      // Ensure lastName is never undefined
-      if (operation.data.lastName === undefined) {
-        operation.data.lastName = ""
-      }
-    }
-
-    // Special handling for dates to ensure proper format
-    if (operation.data) {
-      operation.data = formatDates(operation.data, operation.collection)
-    }
-
-    // Process the operation
+    // Perform the operation
     const result = await performDataEdit(operation)
 
     // Emit an event for the operation
@@ -69,6 +43,26 @@ export async function processDataEditOperation(operation: DataEditOperation) {
       success: false,
       message: `Error: ${error instanceof Error ? error.message : String(error)}`,
     }
+  }
+}
+
+// Process multiple data edit operations
+export async function processMultipleDataEditOperations(
+  operations: DataEditOperation[],
+): Promise<{ success: boolean; message: string; data?: any }[]> {
+  try {
+    // Process each operation
+    const results = await Promise.all(operations.map((operation) => processDataEditOperation(operation)))
+
+    return results
+  } catch (error) {
+    console.error("Error processing multiple data edit operations:", error)
+    return [
+      {
+        success: false,
+        message: `Error: ${error instanceof Error ? error.message : String(error)}`,
+      },
+    ]
   }
 }
 
@@ -285,78 +279,7 @@ export function generateGanttDataExample(): string {
 }`
 }
 
-// Add a function to process multiple operations
-export async function processMultipleDataEditOperations(
-  operations: DataEditOperation[],
-): Promise<{ success: boolean; message: string; data?: any }[]> {
-  const results: { success: boolean; message: string; data?: any }[] = []
-
-  // Process operations sequentially to maintain data integrity
-  for (const operation of operations) {
-    try {
-      const result = await processDataEditOperation(operation)
-      results.push(result)
-    } catch (error) {
-      console.error("Error processing operation:", error)
-      results.push({
-        success: false,
-        message: `Error: ${error instanceof Error ? error.message : String(error)}`,
-      })
-    }
-  }
-
-  return results
-}
-
 // Validate a data edit operation against schemas
-function validateDataEditOperation(operation: DataEditOperation): { valid: boolean; message?: string } {
-  const { type, collection, id, query, data } = operation
-
-  // Check if operation type is valid
-  if (!["add", "update", "delete"].includes(type)) {
-    return { valid: false, message: `Invalid operation type: ${type}` }
-  }
-
-  // Check if collection exists
-  const schemas = getDataSchema()
-  if (!schemas[collection]) {
-    return { valid: false, message: `Unknown collection: ${collection}` }
-  }
-
-  // For delete operations, either id or query must be provided
-  if (type === "delete" && !id && !query) {
-    return { valid: false, message: "Delete operation requires either id or query" }
-  }
-
-  // For add operations, data must be provided
-  if (type === "add" && !data) {
-    return { valid: false, message: "Add operation requires data" }
-  }
-
-  // For update operations, both (id or query) and data must be provided
-  if (type === "update") {
-    if (!data) {
-      return { valid: false, message: "Update operation requires data" }
-    }
-
-    if (!id && !query) {
-      return { valid: false, message: "Update operation requires either id or query to identify the item to update" }
-    }
-  }
-
-  // If data is provided, validate it against the schema
-  if (data && (type === "add" || type === "update")) {
-    const schema = schemas[collection]
-    const dataValidation = validateDataAgainstSchema(data, schema, type === "update")
-    if (!dataValidation.valid) {
-      return { valid: false, message: dataValidation.message }
-    }
-  }
-
-  return { valid: true }
-}
-
-// Update the validateDataAgainstSchema function to better handle Gantt data
 function validateDataAgainstSchema(
   data: Record<string, any>,
   schema: DataSchema,
@@ -592,179 +515,296 @@ function validateDataAgainstSchema(
   return { valid: true }
 }
 
-// Update the generateDataEditSummary function to be more user-friendly
-export function generateDataEditSummary(operation: DataEditOperation | DataEditOperation[]): string {
-  if (Array.isArray(operation)) {
-    const collections = [...new Set(operation.map((op) => op.collection))]
-    const types = [...new Set(operation.map((op) => op.type))]
+// Add this function to validate planner data structure
+const validatePlannerData = (data: any, collection: string): any => {
+  if (!data) return data
 
-    // Create a more user-friendly summary for multiple operations
-    const typeVerbs = {
-      add: "add",
-      update: "update",
-      delete: "delete",
-    }
-
-    const typeVerbsPresent = types.map((t) => typeVerbs[t as keyof typeof typeVerbs]).join("/")
-    const collectionNames = collections
-      .map((c) =>
-        c
-          .replace(/([A-Z])/g, " $1")
-          .trim()
-          .toLowerCase(),
-      )
-      .join(" and ")
-
-    return `${operation.length} changes to ${collectionNames} (${typeVerbsPresent})`
-  }
-
-  try {
-    const { type, collection, data } = operation
-    const collectionName = collection
-      .replace(/([A-Z])/g, " $1")
-      .trim()
-      .toLowerCase()
-    const title = getTitleFromData(data) || "item"
-
-    // Create user-friendly summaries based on operation type
-    switch (type) {
-      case "add":
-        return `Add a new ${collectionName}: "${title}"`
-      case "update":
-        return `Update ${collectionName}: "${title}"`
-      case "delete":
-        return `Delete ${collectionName}: "${title}"`
-      default:
-        return `Unknown operation on ${collectionName}`
-    }
-  } catch (error) {
-    console.error("Error generating summary:", error)
-    return "Data edit operation"
-  }
-}
-
-// Update the generateDataEditDetails function to be more conversational
-export function generateDataEditDetails(operation: DataEditOperation | DataEditOperation[]): string {
-  if (Array.isArray(operation)) {
-    // For multiple operations, create a numbered list
-    return operation
-      .map((op, index) => {
-        const details = generateDataEditDetails(op)
-        return `Change #${index + 1}:\n${details}`
-      })
-      .join("\n\n")
-  }
-
-  try {
-    const { type, collection, id, query, data } = operation
-    const collectionName = collection
-      .replace(/([A-Z])/g, " $1")
-      .trim()
-      .toLowerCase()
-    const title = getTitleFromData(data) || (id ? `ID: ${id}` : "item")
-
-    // Create a conversational description based on operation type
-    let details = ""
-
-    switch (type) {
-      case "add":
-        details = `I'll create a new ${collectionName} called "${title}".`
-        break
-      case "update":
-        details = `I'll update the ${collectionName} "${title}".`
-        break
-      case "delete":
-        details = `I'll delete the ${collectionName} "${title}".`
-        break
-    }
-
-    // Add more specific details based on the data and collection
-    if (data) {
-      // Add collection-specific details in plain language
-      switch (collection) {
-        case "tasks":
-          if (data.dueDate) details += `\nDue date: ${formatDateForDisplay(data.dueDate)}`
-          if (data.priority) details += `\nPriority: ${data.priority}`
-          if (data.description) details += `\nDescription: ${truncateText(data.description, 100)}`
-          break
-
-        case "plannerData":
-        case "meetings":
-          if (data.date) details += `\nDate: ${formatDateForDisplay(data.date)}`
-          if (data.startTime && data.endTime) details += `\nTime: ${data.startTime} to ${data.endTime}`
-          if (data.location) details += `\nLocation: ${data.location}`
-          if (data.description) details += `\nDetails: ${truncateText(data.description, 100)}`
-          break
-
-        case "notes":
-        case "knowledgeItems":
-        case "markdownDocuments":
-          if (data.content) details += `\nContent: ${truncateText(data.content, 100)}`
-          if (data.tags && Array.isArray(data.tags)) details += `\nTags: ${data.tags.join(", ")}`
-          break
-
-        case "contacts":
-          if (data.firstName && data.lastName) details += `\nName: ${data.firstName} ${data.lastName}`
-          if (data.email) details += `\nEmail: ${data.email}`
-          if (data.phone) details += `\nPhone: ${data.phone}`
-          break
-
-        case "projects":
-          if (data.description) details += `\nDescription: ${truncateText(data.description, 100)}`
-          if (data.startDate && data.endDate)
-            details += `\nTimeframe: ${formatDateForDisplay(data.startDate)} to ${formatDateForDisplay(data.endDate)}`
-          if (data.status) details += `\nStatus: ${data.status}`
-          break
-
-        case "financeData":
-          if (data.amount) details += `\nAmount: $${data.amount}`
-          if (data.date) details += `\nDate: ${formatDateForDisplay(data.date)}`
-          if (data.category) details += `\nCategory: ${data.category}`
-          break
+  // If this is planner data, ensure it has the correct structure
+  if (collection === "plannerData") {
+    if (!data.stats) {
+      data.stats = {
+        totalTimeBlocked: 0,
+        completedBlocks: 0,
+        streak: 0,
+        lastActiveDate: null,
       }
     }
 
-    return details
-  } catch (error) {
-    console.error("Error generating details:", error)
-    return "Operation details unavailable"
+    if (!data.settings) {
+      data.settings = {
+        dayStartHour: 6,
+        dayEndHour: 22,
+        timeSlotHeight: 80,
+        defaultBlockDuration: 60,
+        categories: [],
+        templates: [],
+        showCompletedBlocks: true,
+      }
+    }
+
+    if (!data.blocks) {
+      data.blocks = []
+    }
   }
+
+  return data
 }
 
-// Helper function to format dates in a user-friendly way
-function formatDateForDisplay(dateString: string): string {
+// Generate a summary of the data edit operation(s)
+export function generateDataEditSummary(operation: DataEditOperation | DataEditOperation[]): string {
   try {
-    const date = new Date(dateString)
-    return date.toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })
+    if (Array.isArray(operation)) {
+      // Multiple operations
+      const addCount = operation.filter((op) => op.type === "add").length
+      const updateCount = operation.filter((op) => op.type === "update").length
+      const deleteCount = operation.filter((op) => op.type === "delete").length
+
+      const collections = [...new Set(operation.map((op) => op.collection))]
+      const collectionNames = collections.map((c) => formatCollectionName(c)).join(", ")
+
+      let summary = `The AI assistant wants to make ${operation.length} changes to your data:`
+
+      if (addCount > 0) {
+        summary += ` add ${addCount} item${addCount > 1 ? "s" : ""}`
+      }
+
+      if (updateCount > 0) {
+        summary += `${addCount > 0 ? "," : ""} update ${updateCount} item${updateCount > 1 ? "s" : ""}`
+      }
+
+      if (deleteCount > 0) {
+        summary += `${addCount > 0 || updateCount > 0 ? "," : ""} delete ${deleteCount} item${deleteCount > 1 ? "s" : ""}`
+      }
+
+      summary += ` in ${collections.length > 1 ? "these collections" : "this collection"}: ${collectionNames}.`
+
+      return summary
+    } else {
+      // Single operation
+      const { type, collection, id, query, data } = operation
+      const collectionName = formatCollectionName(collection)
+
+      switch (type) {
+        case "add":
+          return `The AI assistant wants to add a new ${collectionName.toLowerCase()} to your data.`
+
+        case "update":
+          if (id) {
+            return `The AI assistant wants to update an existing ${collectionName.toLowerCase()} (ID: ${id}).`
+          } else if (query) {
+            const queryStr = Object.entries(query)
+              .map(([key, value]) => `${key}: ${typeof value === "string" ? `"${value}"` : value}`)
+              .join(", ")
+            return `The AI assistant wants to update ${collectionName.toLowerCase()} matching these criteria: ${queryStr}.`
+          }
+          return `The AI assistant wants to update a ${collectionName.toLowerCase()}.`
+
+        case "delete":
+          if (id) {
+            return `The AI assistant wants to delete a ${collectionName.toLowerCase()} (ID: ${id}).`
+          } else if (query) {
+            const queryStr = Object.entries(query)
+              .map(([key, value]) => `${key}: ${typeof value === "string" ? `"${value}"` : value}`)
+              .join(", ")
+            return `The AI assistant wants to delete ${collectionName.toLowerCase()} matching these criteria: ${queryStr}.`
+          }
+          return `The AI assistant wants to delete a ${collectionName.toLowerCase()}.`
+
+        default:
+          return `The AI assistant wants to perform an unknown operation on your ${collectionName.toLowerCase()} data.`
+      }
+    }
   } catch (error) {
-    return dateString
+    console.error("Error generating data edit summary:", error)
+    return "The AI assistant wants to make changes to your data."
   }
 }
 
-// Helper function to truncate text
-function truncateText(text: string, maxLength: number): string {
-  if (!text) return ""
-  if (text.length <= maxLength) return text
-  return text.substring(0, maxLength) + "..."
+// Generate detailed information about the data edit operation
+export function generateDataEditDetails(operation: DataEditOperation): string {
+  try {
+    const { type, collection, id, query, data } = operation
+    const collectionName = formatCollectionName(collection)
+    const schemas = getDataSchema()
+    const schema = schemas[collection]
+
+    switch (type) {
+      case "add":
+        if (!data) return "No data provided for add operation."
+
+        let addDetails = `Add a new ${collectionName.toLowerCase()} with the following details:\n\n`
+
+        // Format the data based on the schema if available
+        if (schema) {
+          // Add required fields first
+          schema.required.forEach((field) => {
+            if (data[field] !== undefined) {
+              addDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
+            }
+          })
+
+          // Add optional fields
+          schema.optional.forEach((field) => {
+            if (data[field] !== undefined) {
+              addDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
+            }
+          })
+
+          // Add any fields not in the schema
+          Object.keys(data).forEach((field) => {
+            if (!schema.required.includes(field) && !schema.optional.includes(field) && field !== "id") {
+              addDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
+            }
+          })
+        } else {
+          // No schema, just format all fields
+          Object.entries(data).forEach(([field, value]) => {
+            if (field !== "id") {
+              addDetails += `- ${formatFieldName(field)}: ${formatFieldValue(value)}\n`
+            }
+          })
+        }
+
+        return addDetails
+
+      case "update":
+        if (!data) return "No data provided for update operation."
+
+        let updateDetails = `Update ${collectionName.toLowerCase()}`
+
+        if (id) {
+          updateDetails += ` with ID: ${id}`
+        } else if (query) {
+          const queryStr = Object.entries(query)
+            .map(([key, value]) => `${formatFieldName(key)}: ${formatFieldValue(value)}`)
+            .join(", ")
+          updateDetails += ` matching: ${queryStr}`
+        }
+
+        updateDetails += "\n\nChanges to be made:\n\n"
+
+        // Format the data based on the schema if available
+        if (schema) {
+          // Add required fields first
+          schema.required.forEach((field) => {
+            if (data[field] !== undefined) {
+              updateDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
+            }
+          })
+
+          // Add optional fields
+          schema.optional.forEach((field) => {
+            if (data[field] !== undefined) {
+              updateDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
+            }
+          })
+
+          // Add any fields not in the schema
+          Object.keys(data).forEach((field) => {
+            if (!schema.required.includes(field) && !schema.optional.includes(field) && field !== "id") {
+              updateDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
+            }
+          })
+        } else {
+          // No schema, just format all fields
+          Object.entries(data).forEach(([field, value]) => {
+            if (field !== "id") {
+              updateDetails += `- ${formatFieldName(field)}: ${formatFieldValue(value)}\n`
+            }
+          })
+        }
+
+        return updateDetails
+
+      case "delete":
+        let deleteDetails = `Delete ${collectionName.toLowerCase()}`
+
+        if (id) {
+          deleteDetails += ` with ID: ${id}`
+        } else if (query) {
+          const queryStr = Object.entries(query)
+            .map(([key, value]) => `${formatFieldName(key)}: ${formatFieldValue(value)}`)
+            .join(", ")
+          deleteDetails += ` matching: ${queryStr}`
+        }
+
+        deleteDetails += "\n\nThis action will permanently remove the data and cannot be undone."
+
+        return deleteDetails
+
+      default:
+        return `Unknown operation type: ${type}`
+    }
+  } catch (error) {
+    console.error("Error generating data edit details:", error)
+    return "Could not generate details for this operation."
+  }
 }
 
-// Helper function to get a title from data
-function getTitleFromData(data: any): string | null {
-  if (!data) return null
+// Format a collection name for display
+function formatCollectionName(collection: string): string {
+  // Convert camelCase to Title Case with spaces
+  return collection
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (str) => str.toUpperCase())
+    .trim()
+}
 
-  // Special handling for contacts
-  if (data.firstName && data.lastName) {
-    return `${data.firstName} ${data.lastName}`
+// Format a field name for display
+function formatFieldName(field: string): string {
+  // Convert camelCase to Title Case with spaces
+  return field
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (str) => str.toUpperCase())
+    .trim()
+}
+
+// Format a field value for display
+function formatFieldValue(value: any): string {
+  if (value === null || value === undefined) {
+    return "None"
   }
 
-  if (data.title) return data.title
-  if (data.name) return data.name
-  if (data.description) return data.description.substring(0, 30) + (data.description.length > 30 ? "..." : "")
+  if (typeof value === "string") {
+    // Truncate long strings
+    if (value.length > 100) {
+      return `"${value.substring(0, 100)}..."`
+    }
+    return `"${value}"`
+  }
 
-  return null
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No"
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return "Empty list"
+    }
+
+    if (typeof value[0] === "object" && value[0] !== null) {
+      return `List of ${value.length} items`
+    }
+
+    // Format array of primitive values
+    const formattedItems = value.map((item) => {
+      if (typeof item === "string") {
+        return `"${item}"`
+      }
+      return String(item)
+    })
+
+    // Truncate if too many items
+    if (formattedItems.length > 5) {
+      return `[${formattedItems.slice(0, 5).join(", ")}, ... and ${formattedItems.length - 5} more]`
+    }
+
+    return `[${formattedItems.join(", ")}]`
+  }
+
+  if (typeof value === "object") {
+    return "Complex object"
+  }
+
+  return String(value)
 }

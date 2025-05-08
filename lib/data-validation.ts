@@ -1,4 +1,5 @@
 import { getLocalStorage, setLocalStorage, removeLocalStorage, isLocalStorageAvailable } from "./local-storage"
+import { validateBlock } from "./data-manager"
 
 // Types of validation to perform
 export type ValidationRule = "required" | "date" | "number" | "boolean" | "array" | "object" | "string"
@@ -394,4 +395,10 @@ export function validateGanttData(ganttData: any): any {
   }
 
   return validatedData
+}
+
+export function validateBlockArray(blocks: any[]): any[] {
+  if (!Array.isArray(blocks)) return []
+
+  return blocks.filter((block) => block && typeof block === "object").map((block) => validateBlock(block))
 }

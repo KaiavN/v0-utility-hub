@@ -12,11 +12,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { AlertTriangle, Check, Info, Plus, Pencil, Trash2 } from "lucide-react"
+import { AlertTriangle, Check, Info, Plus, Pencil, Trash2, ArrowLeft, ArrowRight } from "lucide-react"
 import type { DataEditOperation } from "@/lib/ai-data-editor"
 import { generateDataEditSummary, generateDataEditDetails } from "@/lib/ai-data-editor"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface DataEditApprovalDialogProps {
   open: boolean
@@ -84,6 +83,14 @@ export function DataEditApprovalDialog({
     setIsApproving(false)
   }
 
+  const handlePrevious = () => {
+    setSelectedOperationIndex((prev) => Math.max(0, prev - 1))
+  }
+
+  const handleNext = () => {
+    setSelectedOperationIndex((prev) => Math.min(operations.length - 1, prev + 1))
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[550px]">
@@ -104,28 +111,40 @@ export function DataEditApprovalDialog({
 
         {operations.length > 1 && (
           <div className="mb-4">
-            <Label>Select change to view details:</Label>
-            <Select
-              value={selectedOperationIndex.toString()}
-              onValueChange={(value) => setSelectedOperationIndex(Number.parseInt(value))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select change" />
-              </SelectTrigger>
-              <SelectContent>
-                {operations.map((op, index) => (
-                  <SelectItem key={index} value={index.toString()}>
-                    <div className="flex items-center gap-2">
-                      {getOperationBadge(op)}
-                      <span>
-                        {op.type === "add" ? "Add new" : op.type === "update" ? "Update" : "Delete"}{" "}
-                        {getCollectionName(op.collection).toLowerCase()}
-                      </span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center justify-between">
+              <Label>
+                Change {selectedOperationIndex + 1} of {operations.length}
+              </Label>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePrevious}
+                  disabled={selectedOperationIndex === 0}
+                  className="h-8 w-8 p-0"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span className="sr-only">Previous</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleNext}
+                  disabled={selectedOperationIndex === operations.length - 1}
+                  className="h-8 w-8 p-0"
+                >
+                  <ArrowRight className="h-4 w-4" />
+                  <span className="sr-only">Next</span>
+                </Button>
+              </div>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              {getOperationBadge(currentOperation)}
+              <span className="font-medium">
+                {currentOperation.type === "add" ? "Add new" : currentOperation.type === "update" ? "Update" : "Delete"}{" "}
+                {getCollectionName(currentOperation.collection).toLowerCase()}
+              </span>
+            </div>
           </div>
         )}
 

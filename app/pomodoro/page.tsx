@@ -38,45 +38,78 @@ interface PomodoroSession {
   lastSessionDate: string
 }
 
+// Default settings to use if none are found in localStorage
+const DEFAULT_SETTINGS: PomodoroSettings = {
+  focusTime: 25,
+  shortBreakTime: 5,
+  longBreakTime: 15,
+  longBreakInterval: 4,
+  autoStartBreaks: true,
+  autoStartPomodoros: true,
+  alarmSound: true,
+  automaticMode: false,
+}
+
+// Default session to use if none is found in localStorage
+const DEFAULT_SESSION: PomodoroSession = {
+  completedPomodoros: 0,
+  totalFocusTime: 0,
+  lastSessionDate: new Date().toISOString().split("T")[0],
+}
+
 export default function PomodoroPage() {
   const { toast } = useToast()
-  const [settings, setSettings] = useState<PomodoroSettings>({
-    focusTime: 25,
-    shortBreakTime: 5,
-    longBreakTime: 15,
-    longBreakInterval: 4,
-    autoStartBreaks: true,
-    autoStartPomodoros: true,
-    alarmSound: true,
-    automaticMode: false, // Default to false
-  })
-
-  const [session, setSession] = useState<PomodoroSession>({
-    completedPomodoros: 0,
-    totalFocusTime: 0,
-    lastSessionDate: new Date().toISOString().split("T")[0],
-  })
-
-  const [timeLeft, setTimeLeft] = useState(settings.focusTime * 60)
+  const [settings, setSettings] = useState<PomodoroSettings>(DEFAULT_SETTINGS)
+  const [session, setSession] = useState<PomodoroSession>(DEFAULT_SESSION)
+  const [timeLeft, setTimeLeft] = useState(DEFAULT_SETTINGS.focusTime * 60)
   const [isActive, setIsActive] = useState(false)
   const [mode, setMode] = useState<"focus" | "shortBreak" | "longBreak">("focus")
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
-    const savedSettings = getLocalStorage<PomodoroSettings>("pomodoroSettings", settings)
-    const savedSession = getLocalStorage<PomodoroSession>("pomodoroSession", session)
+    try {
+      // Load settings from localStorage with fallback to defaults
+      const savedSettings = getLocalStorage<PomodoroSettings>("pomodoroSettings", null)
+      const savedSession = getLocalStorage<PomodoroSession>("pomodoroSession", null)
 
-    setSettings(savedSettings)
-    setSession(savedSession)
+      // Use saved settings if they exist and are valid, otherwise use defaults
+      if (savedSettings && typeof savedSettings === "object" && "focusTime" in savedSettings) {
+        setSettings(savedSettings)
+        // Set initial timer based on loaded settings
+        setTimeLeft(savedSettings.focusTime * 60)
+      } else {
+        console.warn("Invalid or missing pomodoro settings, using defaults")
+        setSettings(DEFAULT_SETTINGS)
+        // Ensure we save the default settings to localStorage
+        setLocalStorage("pomodoroSettings", DEFAULT_SETTINGS)
+      }
 
-    // Reset timer based on current mode
-    resetTimer()
+      // Use saved session if it exists and is valid, otherwise use defaults
+      if (savedSession && typeof savedSession === "object" && "completedPomodoros" in savedSession) {
+        setSession(savedSession)
+      } else {
+        console.warn("Invalid or missing pomodoro session, using defaults")
+        setSession(DEFAULT_SESSION)
+        // Ensure we save the default session to localStorage
+        setLocalStorage("pomodoroSession", DEFAULT_SESSION)
+      }
 
-    // Create audio element
-    audioRef.current = new Audio("/alarm.mp3")
+      // Create audio element
+      audioRef.current = new Audio("/alarm.mp3")
+
+      setIsInitialized(true)
+    } catch (error) {
+      console.error("Error initializing pomodoro:", error)
+      // Ensure we have valid settings even if there was an error
+      setSettings(DEFAULT_SETTINGS)
+      setSession(DEFAULT_SESSION)
+      setTimeLeft(DEFAULT_SETTINGS.focusTime * 60)
+      setIsInitialized(true)
+    }
 
     return () => {
       if (timerRef.current) {
@@ -86,12 +119,16 @@ export default function PomodoroPage() {
   }, [])
 
   useEffect(() => {
-    setLocalStorage("pomodoroSettings", settings)
-  }, [settings])
+    if (isInitialized) {
+      setLocalStorage("pomodoroSettings", settings)
+    }
+  }, [settings, isInitialized])
 
   useEffect(() => {
-    setLocalStorage("pomodoroSession", session)
-  }, [session])
+    if (isInitialized) {
+      setLocalStorage("pomodoroSession", session)
+    }
+  }, [session, isInitialized])
 
   useEffect(() => {
     if (isActive) {
@@ -255,6 +292,20 @@ export default function PomodoroPage() {
     }
 
     return ((totalSeconds - timeLeft) / totalSeconds) * 100
+  }
+
+  // If not initialized yet, show a loading state
+  if (!isInitialized) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-2">Loading Pomodoro Timer...</h2>
+            <p className="text-muted-foreground">Please wait while we set up your timer.</p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

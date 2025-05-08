@@ -13,6 +13,7 @@ import { Save, FileText, Plus, Trash2, Eye, Edit, Download } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import ReactMarkdown from "react-markdown"
+import { useToast } from "@/components/ui/use-toast"
 
 interface MarkdownDocument {
   id: string
@@ -28,32 +29,73 @@ export default function MarkdownPage() {
   const [content, setContent] = useState("")
   const [isSaved, setIsSaved] = useState(true)
   const [activeTab, setActiveTab] = useState<"edit" | "preview">("edit")
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const initialLoadRef = useRef(false)
   const isNavigatingRef = useRef(false)
+  const { toast } = useToast()
 
   // Load documents from localStorage on component mount
   useEffect(() => {
     if (initialLoadRef.current) return
 
-    const storedDocs = localStorage.getItem("markdownDocuments")
-    if (storedDocs) {
-      try {
-        setDocuments(JSON.parse(storedDocs))
-      } catch (e) {
-        console.error("Failed to parse stored documents:", e)
+    try {
+      setIsLoading(true)
+      const storedDocs = localStorage.getItem("markdownDocuments")
+
+      if (storedDocs) {
+        try {
+          const parsedDocs = JSON.parse(storedDocs)
+          // Ensure parsedDocs is an array
+          if (Array.isArray(parsedDocs)) {
+            setDocuments(parsedDocs)
+          } else {
+            console.error("Stored markdown documents is not an array:", parsedDocs)
+            setDocuments([])
+            setLoadError("Stored documents data is invalid. Starting with empty list.")
+            toast({
+              title: "Data Error",
+              description: "Your markdown documents data was corrupted. Starting with an empty list.",
+              variant: "destructive",
+            })
+          }
+        } catch (e) {
+          console.error("Failed to parse stored documents:", e)
+          setDocuments([])
+          setLoadError("Failed to parse stored documents. Starting with empty list.")
+          toast({
+            title: "Data Error",
+            description: "Failed to load your markdown documents. Starting with an empty list.",
+            variant: "destructive",
+          })
+        }
+      } else {
+        // No documents yet, that's fine
+        console.log("No markdown documents found in localStorage, initializing with empty array")
+        localStorage.setItem("markdownDocuments", JSON.stringify([]))
         setDocuments([])
       }
+    } catch (e) {
+      console.error("Error loading markdown documents:", e)
+      setDocuments([])
+      setLoadError("Error loading documents. Starting with empty list.")
+      toast({
+        title: "Data Error",
+        description: "An error occurred while loading your markdown documents.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+      initialLoadRef.current = true
     }
-
-    initialLoadRef.current = true
-  }, [])
+  }, [toast])
 
   // Handle URL document ID changes
   useEffect(() => {
-    if (!initialLoadRef.current) return
+    if (!initialLoadRef.current || isLoading) return
 
     const docId = searchParams.get("id")
     if (docId && docId !== currentDocId) {
@@ -65,14 +107,23 @@ export default function MarkdownPage() {
         setIsSaved(true)
       }
     }
-  }, [searchParams, documents, currentDocId])
+  }, [searchParams, documents, currentDocId, isLoading])
 
   // Save documents to localStorage whenever they change
   useEffect(() => {
-    if (!initialLoadRef.current) return
+    if (!initialLoadRef.current || isLoading) return
 
-    localStorage.setItem("markdownDocuments", JSON.stringify(documents))
-  }, [documents])
+    try {
+      localStorage.setItem("markdownDocuments", JSON.stringify(documents))
+    } catch (e) {
+      console.error("Failed to save documents to localStorage:", e)
+      toast({
+        title: "Save Error",
+        description: "Failed to save your documents to local storage.",
+        variant: "destructive",
+      })
+    }
+  }, [documents, isLoading, toast])
 
   // Set up beforeunload event to warn about unsaved changes
   useEffect(() => {
@@ -168,12 +219,29 @@ export default function MarkdownPage() {
       // Ensure the updated documents are saved to localStorage immediately
       const updatedDocs = documents.map((doc) => (doc.id === currentDocId ? updatedDoc : doc))
 
-      localStorage.setItem("markdownDocuments", JSON.stringify(updatedDocs))
-      console.log("Saved document:", title, "Content length:", content?.length || 0)
-      setIsSaved(true)
+      try {
+        localStorage.setItem("markdownDocuments", JSON.stringify(updatedDocs))
+        console.log("Saved document:", title, "Content length:", content?.length || 0)
+        setIsSaved(true)
+        toast({
+          title: "Document Saved",
+          description: "Your document has been saved successfully.",
+        })
+      } catch (storageError) {
+        console.error("Error saving to localStorage:", storageError)
+        toast({
+          title: "Save Error",
+          description: "Failed to save to local storage. Please try again.",
+          variant: "destructive",
+        })
+      }
     } catch (error) {
       console.error("Error saving document:", error)
-      alert("There was an error saving your document. Please try again.")
+      toast({
+        title: "Error",
+        description: "There was an error saving your document. Please try again.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -279,6 +347,35 @@ export default function MarkdownPage() {
     }, 0)
   }
 
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="container mx-auto p-4 flex items-center justify-center h-[70vh]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-lg">Loading documents...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show error state if there was a problem loading
+  if (loadError && documents.length === 0) {
+    return (
+      <div className="container mx-auto p-4">
+        <Card className="border-destructive">
+          <CardContent className="p-6">
+            <div className="text-center">
+              <h2 className="text-xl font-bold text-destructive mb-2">Error Loading Documents</h2>
+              <p className="mb-4">{loadError}</p>
+              <Button onClick={createNewDocument}>Create New Document</Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="container mx-auto p-4">
       <div className="flex flex-col space-y-4">
@@ -315,7 +412,7 @@ export default function MarkdownPage() {
               <h2 className="text-lg font-semibold mb-2">Documents</h2>
               <ScrollArea className="h-[calc(100vh-200px)]">
                 <div className="space-y-2">
-                  {documents.length === 0 ? (
+                  {!documents || documents.length === 0 ? (
                     <p className="text-sm text-gray-500 dark:text-gray-400">No documents yet</p>
                   ) : (
                     documents

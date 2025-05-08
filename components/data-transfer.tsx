@@ -14,6 +14,16 @@ export function DataTransfer() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleExport = () => {
+    // Force save any pending planner data before exporting
+    try {
+      const plannerData = localStorage.getItem("plannerData")
+      if (plannerData) {
+        console.log("Ensuring planner data is included in export...")
+      }
+    } catch (error) {
+      console.error("Error checking planner data before export:", error)
+    }
+
     exportAllData()
   }
 

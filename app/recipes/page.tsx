@@ -137,17 +137,25 @@ export default function RecipesPage() {
 
   // Load data from local storage
   useEffect(() => {
-    const savedRecipes = getLocalStorage<Recipe[]>("recipes", [])
-    const savedCategories = getLocalStorage<string[]>("recipeCategories", defaultCategories)
+    try {
+      const savedRecipes = getLocalStorage<Recipe[]>("recipes", [])
+      const savedCategories = getLocalStorage<string[]>("recipeCategories", defaultCategories)
 
-    setRecipes(savedRecipes)
-    setCategories(savedCategories)
+      // Ensure recipes is always an array
+      setRecipes(Array.isArray(savedRecipes) ? savedRecipes : [])
+      setCategories(Array.isArray(savedCategories) ? savedCategories : [...defaultCategories])
 
-    // Reset custom category states
-    setIsCustomCategory(false)
-    setCustomCategoryName("")
-    setIsEditCustomCategory(false)
-    setEditCustomCategoryName("")
+      // Reset custom category states
+      setIsCustomCategory(false)
+      setCustomCategoryName("")
+      setIsEditCustomCategory(false)
+      setEditCustomCategoryName("")
+    } catch (error) {
+      console.error("Error loading recipe data:", error)
+      // Fallback to empty arrays if there's an error
+      setRecipes([])
+      setCategories([...defaultCategories])
+    }
   }, [])
 
   // Save recipes to local storage
@@ -390,7 +398,7 @@ export default function RecipesPage() {
   }
 
   // Filter recipes based on category and search query
-  const filteredRecipes = recipes.filter((recipe) => {
+  const filteredRecipes = (recipes || []).filter((recipe) => {
     const matchesCategory = activeCategory === "All" || recipe.category === activeCategory
     const matchesSearch =
       recipe.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -402,7 +410,7 @@ export default function RecipesPage() {
   })
 
   // Sort recipes
-  const sortedRecipes = [...filteredRecipes].sort((a, b) => {
+  const sortedRecipes = [...(filteredRecipes || [])].sort((a, b) => {
     switch (sortBy) {
       case "newest":
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -420,7 +428,7 @@ export default function RecipesPage() {
   })
 
   // Get all unique tags from recipes
-  const allTags = Array.from(new Set(recipes.flatMap((recipe) => recipe.tags))).sort()
+  const allTags = Array.from(new Set((recipes || []).flatMap((recipe) => recipe.tags))).sort()
 
   // Calculate total time (prep + cook)
   const calculateTotalTime = (prepTime: number, cookTime: number) => {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   CalendarIcon,
   ChevronLeft,
@@ -10,36 +10,21 @@ import {
   Flame,
   MoreHorizontal,
   Plus,
-  Save,
   Settings,
   Trash,
   X,
   Check,
   ChevronDown,
   Calendar,
-  ChevronUp,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
-import { getLocalStorage, setLocalStorage } from "@/lib/local-storage"
+import { getLocalStorage, setLocalStorage, flushLocalStorageWrites } from "@/lib/local-storage"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,6 +35,55 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Progress } from "@/components/ui/progress"
 import { eventBus } from "@/lib/event-bus"
+import { fixPlannerDataStructure, validateBlock } from "@/lib/data-manager"
+// Add import for the diagnostic utility at the top of the file
+import { runPlannerDataDiagnostic, exposeDebugFunctions } from "@/lib/planner-data-diagnostic"
+// Add import for the integrity check component at the top of the file
+import { PlannerDataIntegrityCheck } from "@/components/planner-data-integrity-check"
+// Add the import at the top with other imports
+import { setupCalendarDataProtection } from "@/lib/calendar-data-protection"
+
+// Add this at the top of the file, after the imports
+const DEBUG = process.env.NODE_ENV === "development"
+
+// Create a structured logger helper
+const logger = {
+  info: (message: string, ...data: any[]) => {
+    if (!DEBUG) return
+    console.info(`%c📅 INFO: ${message}`, "color: #3b82f6; font-weight: bold;", ...data)
+  },
+  success: (message: string, ...data: any[]) => {
+    if (!DEBUG) return
+    console.log(`%c✅ SUCCESS: ${message}`, "color: #10b981; font-weight: bold;", ...data)
+  },
+  warn: (message: string, ...data: any[]) => {
+    if (!DEBUG) return
+    console.warn(`%c⚠️ WARNING: ${message}`, "color: #f59e0b; font-weight: bold;", ...data)
+  },
+  error: (message: string, ...data: any[]) => {
+    if (!DEBUG) return
+    console.error(`%c❌ ERROR: ${message}`, "color: #ef4444; font-weight: bold;", ...data)
+  },
+  group: (name: string) => {
+    if (!DEBUG) return
+    console.group(`%c📋 ${name}`, "color: #8b5cf6; font-weight: bold;")
+  },
+  groupEnd: () => {
+    if (!DEBUG) return
+    console.groupEnd()
+  },
+  debug: (message: string, ...data: any[]) => {
+    if (!DEBUG) return
+    console.debug(`%c🔍 DEBUG: ${message}`, "color: #6b7280; font-weight: bold;", ...data)
+  },
+  table: (data: any, message?: string) => {
+    if (!DEBUG) return
+    if (message) {
+      console.log(`%c📊 ${message}:`, "color: #8b5cf6; font-weight: bold;")
+    }
+    console.table(data)
+  },
+}
 
 // Types
 interface TimeBlock {
@@ -223,6 +257,112 @@ const initialPlannerData: PlannerData = {
   },
 }
 
+// Validate and repair planner data structure
+const validatePlannerData = (data: PlannerData): PlannerData => {
+  try {
+    // Create a deep copy to avoid mutating the original
+    const validatedData = JSON.parse(JSON.stringify(data))
+
+    // Ensure blocks array exists and is valid
+    if (!Array.isArray(validatedData.blocks)) {
+      logger.warn("Blocks array was invalid, resetting to empty array")
+      validatedData.blocks = []
+    } else {
+      // Validate each block
+      validatedData.blocks = validatedData.blocks
+        .filter((block) => {
+          // Filter out invalid blocks
+          if (!block || typeof block !== "object") {
+            logger.warn("Removed invalid block from planner data")
+            return false
+          }
+          return true
+        })
+        .map((block) => {
+          // Ensure all required block properties exist
+          return {
+            id: block.id || Date.now().toString() + Math.random().toString(36).substring(2),
+            title: block.title || "Untitled Block",
+            description: block.description || "",
+            startTime: block.startTime || "09:00",
+            endTime: block.endTime || "10:00",
+            date: block.date || new Date().toISOString().split("T")[0],
+            color: block.color || "bg-blue-500",
+            category: block.category || "work",
+            isRecurring: !!block.isRecurring,
+            recurringPattern: block.recurringPattern,
+            completed: !!block.completed,
+          }
+        })
+    }
+
+    // Ensure settings object exists
+    if (!validatedData.settings || typeof validatedData.settings !== "object") {
+      logger.warn("Settings object was invalid, resetting to defaults")
+      validatedData.settings = { ...initialPlannerData.settings }
+    } else {
+      // Ensure all settings properties exist with valid values
+      validatedData.settings = {
+        ...initialPlannerData.settings,
+        ...validatedData.settings,
+        // Ensure numeric values are valid
+        dayStartHour: Number.isInteger(validatedData.settings.dayStartHour)
+          ? Math.min(Math.max(validatedData.settings.dayStartHour, 0), 23)
+          : initialPlannerData.settings.dayStartHour,
+        dayEndHour: Number.isInteger(validatedData.settings.dayEndHour)
+          ? Math.min(Math.max(validatedData.settings.dayEndHour, 0), 23)
+          : initialPlannerData.settings.dayEndHour,
+        timeSlotHeight: Number.isInteger(validatedData.settings.timeSlotHeight)
+          ? Math.min(Math.max(validatedData.settings.timeSlotHeight, 40), 200)
+          : initialPlannerData.settings.timeSlotHeight,
+        defaultBlockDuration: Number.isInteger(validatedData.settings.defaultBlockDuration)
+          ? Math.min(Math.max(validatedData.settings.defaultBlockDuration, 5), 240)
+          : initialPlannerData.settings.defaultBlockDuration,
+      }
+
+      // Ensure categories array exists and is valid
+      if (!Array.isArray(validatedData.settings.categories)) {
+        validatedData.settings.categories = [...defaultCategories]
+      }
+
+      // Ensure templates array exists and is valid
+      if (!Array.isArray(validatedData.settings.templates)) {
+        validatedData.settings.templates = [...defaultTemplates]
+      }
+    }
+
+    // Ensure stats object exists
+    if (!validatedData.stats || typeof validatedData.stats !== "object") {
+      logger.warn("Stats object was invalid, resetting to defaults")
+      validatedData.stats = {
+        totalTimeBlocked: 0,
+        completedBlocks: 0,
+        streak: 0,
+        lastActiveDate: null,
+      }
+    } else {
+      // Ensure all stats properties exist with valid values
+      validatedData.stats = {
+        totalTimeBlocked:
+          typeof validatedData.stats.totalTimeBlocked === "number"
+            ? Math.max(0, validatedData.stats.totalTimeBlocked)
+            : 0,
+        completedBlocks:
+          typeof validatedData.stats.completedBlocks === "number"
+            ? Math.max(0, validatedData.stats.completedBlocks)
+            : 0,
+        streak: typeof validatedData.stats.streak === "number" ? Math.max(0, validatedData.stats.streak) : 0,
+        lastActiveDate: validatedData.stats.lastActiveDate || null,
+      }
+    }
+
+    return validatedData
+  } catch (error) {
+    logger.error("Error validating planner data, returning defaults:", error)
+    return { ...initialPlannerData }
+  }
+}
+
 // Helper functions
 const formatTime = (time: string): string => {
   const [hours, minutes] = time.split(":").map(Number)
@@ -236,7 +376,7 @@ function formatDateForDisplay(dateString: string): string {
     // Check if the date string is valid
     const date = new Date(dateString)
     if (isNaN(date.getTime())) {
-      console.warn(`Invalid date string: ${dateString}`)
+      logger.warn(`Invalid date string: ${dateString}`)
       return "Invalid date"
     }
 
@@ -247,7 +387,7 @@ function formatDateForDisplay(dateString: string): string {
       year: "numeric",
     })
   } catch (error) {
-    console.error(`Error formatting date: ${dateString}`, error)
+    logger.error(`Error formatting date: ${dateString}`, error)
     return "Invalid date"
   }
 }
@@ -302,7 +442,7 @@ function validateDateFormat(dateString: string): string | null {
   return null
 }
 
-function parseDate(dateString: string): Date | undefined {
+function parseDate(dateString: string): Date | null {
   // Try ISO format first (YYYY-MM-DD)
   const isoRegex = /^\d{4}-\d{2}-\d{2}$/
   if (isoRegex.test(dateString)) {
@@ -312,21 +452,21 @@ function parseDate(dateString: string): Date | undefined {
     }
   }
 
-  // Validate the DD/MM/YYYY format
-  const validationError = validateDateFormat(dateString)
-  if (validationError) {
-    return undefined
+  // Try DD/MM/YYYY format
+  const regex = /^(\d{2})\/(\d{2})\/(\d{4})$/
+  const match = dateString.match(regex)
+  if (match) {
+    const day = Number.parseInt(match[1], 10)
+    const month = Number.parseInt(match[2], 10) - 1 // Months are 0-indexed in JS Date
+    const year = Number.parseInt(match[3], 10)
+
+    const date = new Date(year, month, day)
+    if (!isNaN(date.getTime())) {
+      return date
+    }
   }
 
-  // If we get here, we know the format is valid
-  const regex = /^(\d{2})\/(\d{2})\/(\d{4})$/
-  const match = dateString.match(regex)!
-
-  const day = Number.parseInt(match[1], 10)
-  const month = Number.parseInt(match[2], 10) - 1 // Months are 0-indexed in JS Date
-  const year = Number.parseInt(match[3], 10)
-
-  return new Date(year, month, day)
+  return null
 }
 
 const getTimeBlocksForDate = (blocks: TimeBlock[], date: string): TimeBlock[] => {
@@ -413,20 +553,164 @@ export default function DailyPlannerPage() {
   // Define state first
   const [plannerData, setPlannerData] = useState<PlannerData>(initialPlannerData)
   const { toast } = useToast()
+  const dataLoaded = useRef(false)
+  const saveTimeout = useRef<NodeJS.Timeout | null>(null)
 
-  // Move event subscriptions into useEffect hooks
+  // Fix plannerData structure if needed
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        fixPlannerDataStructure()
+      } catch (error) {
+        logger.error("Error fixing planner data structure:", error)
+      }
+    }
+  }, [])
+
+  // Load data from local storage
+  useEffect(() => {
+    try {
+      // Expose debug functions for browser console
+      exposeDebugFunctions()
+
+      // Run diagnostic on load to catch and fix issues
+      logger.info("Running planner data diagnostic on load")
+      const diagnosticResult = runPlannerDataDiagnostic()
+
+      if (diagnosticResult.issues.length > 0) {
+        logger.warn(`Found ${diagnosticResult.issues.length} issues with planner data:`, diagnosticResult.issues)
+      }
+
+      if (diagnosticResult.fixed.length > 0) {
+        logger.info(`Fixed ${diagnosticResult.fixed.length} issues with planner data:`, diagnosticResult.fixed)
+      }
+
+      // Only load data once to prevent overwriting changes
+      if (!dataLoaded.current) {
+        logger.group("📅 Calendar: Loading planner data")
+        logger.info("Loading planner data from localStorage...")
+        let savedData
+
+        try {
+          // First try to get the data directly from localStorage
+          if (typeof window !== "undefined") {
+            const rawData = window.localStorage.getItem("plannerData")
+            if (rawData) {
+              logger.info(`Raw plannerData found (${rawData.length} chars)`)
+              logger.debug(`Raw data first 100 chars: ${rawData.substring(0, 100)}...`)
+
+              try {
+                savedData = JSON.parse(rawData)
+                logger.success("✅ Successfully parsed plannerData from localStorage")
+
+                // Log the blocks count for debugging
+                if (savedData && Array.isArray(savedData.blocks)) {
+                  logger.info(`Found ${savedData.blocks.length} blocks in localStorage`)
+
+                  // Log the first block for debugging
+                  if (savedData.blocks.length > 0) {
+                    logger.debug("First block:", savedData.blocks[0])
+                  }
+                } else {
+                  logger.warn("No blocks array found in plannerData or it's empty")
+                }
+              } catch (parseError) {
+                logger.error("❌ Error parsing plannerData from localStorage:", parseError)
+                // Fall back to the helper function
+                savedData = getLocalStorage<PlannerData>("plannerData", initialPlannerData)
+              }
+            } else {
+              logger.info("No plannerData found in localStorage, using default")
+              savedData = initialPlannerData
+
+              // Save the default data
+              window.localStorage.setItem("plannerData", JSON.stringify(initialPlannerData))
+            }
+          } else {
+            logger.info("Window is undefined, using initialPlannerData")
+            savedData = initialPlannerData
+          }
+        } catch (storageError) {
+          logger.error("❌ Error accessing localStorage:", storageError)
+          savedData = initialPlannerData
+        }
+
+        // Ensure savedData is not null or undefined
+        if (!savedData) {
+          logger.warn("⚠️ savedData is null or undefined, using initialPlannerData")
+          savedData = { ...initialPlannerData }
+        }
+
+        // Ensure blocks array exists
+        if (!savedData.blocks || !Array.isArray(savedData.blocks)) {
+          logger.warn("⚠️ savedData.blocks is not an array, initializing empty array")
+          savedData.blocks = []
+        }
+
+        // Validate and repair the data before using it
+        logger.info("Validating plannerData structure...")
+        const validatedData = validatePlannerData(savedData)
+
+        // If validation made changes, save the repaired data
+        if (JSON.stringify(savedData) !== JSON.stringify(validatedData)) {
+          logger.warn("⚠️ Data validation repaired planner data, saving fixed version")
+          try {
+            if (typeof window !== "undefined") {
+              window.localStorage.setItem("plannerData", JSON.stringify(validatedData))
+            }
+            setLocalStorage("plannerData", validatedData, true)
+            logger.success("✅ Saved repaired planner data to localStorage")
+          } catch (saveError) {
+            logger.error("❌ Error saving repaired planner data:", saveError)
+          }
+        }
+
+        logger.info("Setting planner data state with validated data")
+        logger.debug("Blocks count before setting state:", validatedData.blocks ? validatedData.blocks.length : 0)
+        setPlannerData(validatedData)
+        dataLoaded.current = true
+        logger.success("✅ Data loaded successfully")
+
+        // Update streak if needed
+        updateStreak(validatedData)
+        logger.groupEnd()
+      }
+    } catch (error) {
+      logger.error("❌ Error loading planner data:", error)
+      // Fall back to initial data if there's an error
+      setPlannerData({ ...initialPlannerData })
+      toast({
+        title: "Data Loading Error",
+        description: "Could not load your planner data. Using default settings.",
+        variant: "destructive",
+      })
+      logger.groupEnd()
+    }
+
+    // Set up calendar data protection
+    if (typeof window !== "undefined") {
+      setupCalendarDataProtection()
+    }
+  }, [toast])
+
+  // Subscribe to data updates
   useEffect(() => {
     // Subscribe to data updates
-    const unsubscribe1 = eventBus.subscribe("data:plannerData:updated", () => {
-      console.log("Calendar data updated, refreshing from localStorage")
-      const savedData = getLocalStorage<PlannerData>("plannerData", initialPlannerData)
-      setPlannerData(savedData)
+    const unsubscribe1 = eventBus.subscribe("data:plannerData:updated", (updatedData) => {
+      logger.info("Calendar data updated via event, refreshing from event data")
+      if (updatedData && !Array.isArray(updatedData) && updatedData.blocks) {
+        setPlannerData(updatedData as PlannerData)
+      } else {
+        logger.info("Calendar data updated, refreshing from localStorage")
+        const savedData = getLocalStorage<PlannerData>("plannerData", initialPlannerData)
+        setPlannerData(savedData)
+      }
     })
 
     // Also subscribe to general data updates
     const unsubscribe2 = eventBus.subscribe("data:updated", (updateInfo) => {
       if (updateInfo?.collection === "plannerData" || updateInfo?.collection === "calendar") {
-        console.log("Calendar data updated via general event, refreshing from localStorage")
+        logger.info("Calendar data updated via general event, refreshing from localStorage")
         const savedData = getLocalStorage<PlannerData>("plannerData", initialPlannerData)
         setPlannerData(savedData)
       }
@@ -438,6 +722,26 @@ export default function DailyPlannerPage() {
       unsubscribe2()
     }
   }, [])
+
+  // Save data before unloading the page
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Force immediate save of any pending data
+      if (saveTimeout.current) {
+        clearTimeout(saveTimeout.current)
+        saveTimeout.current = null
+      }
+      setLocalStorage("plannerData", plannerData, true)
+      flushLocalStorageWrites()
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => {
+      window.removeEventListener("beforeUnload", handleBeforeUnload)
+      // Also save when component unmounts
+      handleBeforeUnload()
+    }
+  }, [plannerData])
 
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split("T")[0])
   const [selectedView, setSelectedView] = useState<"day" | "week">("day")
@@ -460,85 +764,312 @@ export default function DailyPlannerPage() {
   })
   const [selectedTemplate, setSelectedTemplate] = useState<string>("")
 
-  // Load data from local storage
-  useEffect(() => {
-    const savedData = getLocalStorage<PlannerData>("plannerData", initialPlannerData)
-    setPlannerData(savedData)
-
-    // Update streak if needed
-    updateStreak(savedData)
-  }, [])
-
   // Update streak when date changes
   useEffect(() => {
     updateStreak(plannerData)
   }, [selectedDate])
 
-  // Save data to local storage
-  const savePlannerData = (data: PlannerData) => {
-    setPlannerData(data)
-    setLocalStorage("plannerData", data)
-  }
+  // Save data to local storage with debounce
+  const savePlannerData = useCallback(
+    (data: PlannerData) => {
+      try {
+        logger.group("💾 Calendar: Saving planner data")
 
-  // Update streak based on activity
-  const updateStreak = (data: PlannerData) => {
-    const today = new Date().toISOString().split("T")[0]
-    const { lastActiveDate, streak } = data.stats
+        // Make a deep copy to avoid reference issues
+        logger.info("Creating deep copy of data")
+        const dataCopy = JSON.parse(JSON.stringify(data))
 
-    let updatedStreak = streak
-    let updatedLastActiveDate = lastActiveDate
+        // Log the data structure
+        logger.debug("Data structure check:", {
+          hasBlocks: !!dataCopy.blocks,
+          blocksIsArray: Array.isArray(dataCopy.blocks),
+          blocksLength: Array.isArray(dataCopy.blocks) ? dataCopy.blocks.length : "N/A",
+          hasSettings: !!dataCopy.settings,
+          hasStats: !!dataCopy.stats,
+        })
 
-    // If this is the first time using the app
-    if (!lastActiveDate) {
-      updatedStreak = 1
-      updatedLastActiveDate = today
-    }
-    // If user was active yesterday, increment streak
-    else if (getPreviousDay(today) === lastActiveDate) {
-      updatedStreak = streak + 1
-      updatedLastActiveDate = today
-    }
-    // If user was active today already, keep streak
-    else if (today === lastActiveDate) {
-      // No change needed
-    }
-    // If user missed a day or more, reset streak
-    else {
-      updatedStreak = 1
-      updatedLastActiveDate = today
-    }
+        // Validate the data before saving
+        logger.info("Validating data...")
+        const validatedData = validatePlannerData(dataCopy)
 
-    if (updatedStreak !== streak || updatedLastActiveDate !== lastActiveDate) {
-      const updatedData = {
-        ...data,
-        stats: {
-          ...data.stats,
-          streak: updatedStreak,
-          lastActiveDate: updatedLastActiveDate,
-        },
+        // Update state with validated data
+        logger.info("Updating state with validated data")
+        setPlannerData(validatedData)
+
+        // Clear any existing timeout
+        if (saveTimeout.current) {
+          logger.info("Clearing existing save timeout")
+          clearTimeout(saveTimeout.current)
+        }
+
+        // Set a new timeout to save the data
+        logger.info("Setting new save timeout")
+        saveTimeout.current = setTimeout(() => {
+          try {
+            logger.info("Save timeout triggered, saving data to localStorage...")
+
+            // Force immediate save to localStorage
+            if (typeof window !== "undefined") {
+              try {
+                const dataString = JSON.stringify(validatedData)
+                logger.info(`Saving data directly to localStorage (${dataString.length} chars)`)
+                window.localStorage.setItem("plannerData", dataString)
+                logger.success("✅ Successfully saved planner data directly to localStorage")
+
+                // Verify the data was actually saved
+                const savedData = window.localStorage.getItem("plannerData")
+                if (savedData) {
+                  logger.success(`✅ Verified data was saved (${savedData.length} chars)`)
+
+                  // Also save using the helper function as a backup
+                  setLocalStorage("plannerData", validatedData, true)
+
+                  // Notify other components about the data change
+                  eventBus.publish("data:plannerData:updated", validatedData)
+                  eventBus.publish("data:updated", { collection: "plannerData" })
+                } else {
+                  logger.error("❌ Failed to verify data was saved - not found in localStorage after save")
+                  // Fall back to helper function
+                  setLocalStorage("plannerData", validatedData, true)
+                  eventBus.publish("data:plannerData:updated", validatedData)
+                  eventBus.publish("data:updated", { collection: "plannerData" })
+                }
+              } catch (directSaveError) {
+                logger.error("❌ Error saving directly to localStorage:", directSaveError)
+                // Fall back to the helper function
+                setLocalStorage("plannerData", validatedData, true)
+                eventBus.publish("data:plannerData:updated", validatedData)
+                eventBus.publish("data:updated", { collection: "plannerData" })
+              }
+            } else {
+              setLocalStorage("plannerData", validatedData, true)
+              eventBus.publish("data:plannerData:updated", validatedData)
+              eventBus.publish("data:updated", { collection: "plannerData" })
+            }
+
+            // Ensure all writes are processed
+            flushLocalStorageWrites()
+
+            logger.success("✅ Planner data saved successfully")
+            logger.groupEnd()
+          } catch (storageError) {
+            logger.error("❌ Failed to save planner data to localStorage:", storageError)
+            toast({
+              title: "Storage Error",
+              description: "Failed to save your changes. Please try again.",
+              variant: "destructive",
+            })
+            logger.groupEnd()
+          }
+        }, 50) // Reduce debounce to 50ms for quicker saves
+
+        logger.info("Save timeout set")
+        logger.groupEnd()
+      } catch (error) {
+        logger.error("❌ Error in savePlannerData:", error)
+        toast({
+          title: "Error Saving Data",
+          description: "An unexpected error occurred while saving your data.",
+          variant: "destructive",
+        })
+        logger.groupEnd()
       }
-      savePlannerData(updatedData)
+    },
+    [toast],
+  )
+
+  // Add a function to manually save all data when needed
+
+  // Add this function after the savePlannerData function:
+  const forceSavePlannerData = useCallback(() => {
+    try {
+      logger.group("🔄 Calendar: Force saving planner data")
+
+      // Make a deep copy to avoid reference issues
+      const dataCopy = JSON.parse(JSON.stringify(plannerData))
+
+      // Validate the data
+      const validatedData = validatePlannerData(dataCopy)
+
+      // Direct save to localStorage
+      if (typeof window !== "undefined") {
+        try {
+          const dataString = JSON.stringify(validatedData)
+          window.localStorage.setItem("plannerData", dataString)
+          logger.success("✅ Force saved planner data directly to localStorage")
+
+          // Verify the save
+          const savedData = window.localStorage.getItem("plannerData")
+          if (savedData) {
+            logger.success(`✅ Verified force save was successful (${savedData.length} chars)`)
+          } else {
+            logger.error("❌ Failed to verify force save")
+          }
+        } catch (error) {
+          logger.error("❌ Error with direct force save:", error)
+        }
+      }
+
+      // Also use the helper function
+      setLocalStorage("plannerData", validatedData, true)
+      flushLocalStorageWrites()
+
+      // Notify other components
+      eventBus.publish("data:plannerData:updated", validatedData)
+      eventBus.publish("data:updated", { collection: "plannerData" })
+
+      logger.success("✅ Force save completed")
+      logger.groupEnd()
+      // Notify other components
+      eventBus.publish("data:plannerData:updated", validatedData)
+      eventBus.publish("data:updated", { collection: "plannerData" })
+
+      logger.success("✅ Force save completed")
+      logger.groupEnd()
+    } catch (error) {
+      logger.error("❌ Error in forceSavePlannerData:", error)
+      logger.groupEnd()
     }
-  }
+  }, [plannerData])
 
-  // Time slots for the day view
-  const timeSlots = useMemo(() => {
-    return generateTimeSlots(plannerData.settings.dayStartHour, plannerData.settings.dayEndHour)
-  }, [plannerData.settings.dayStartHour, plannerData.settings.dayEndHour])
+  // Add this function after the forceSavePlannerData function
+  const debugPlannerData = useCallback(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const rawData = window.localStorage.getItem("plannerData")
+        if (rawData) {
+          try {
+            const parsedData = JSON.parse(rawData)
+            console.log("📊 Current plannerData in localStorage:", parsedData)
+            console.log("📊 Blocks count:", parsedData.blocks ? parsedData.blocks.length : 0)
+            console.log(
+              "📊 First block:",
+              parsedData.blocks && parsedData.blocks.length > 0 ? parsedData.blocks[0] : "No blocks",
+            )
 
-  // Get blocks for the selected date
-  const blocksForSelectedDate = useMemo(() => {
-    const blocks = getTimeBlocksForDate(plannerData.blocks, selectedDate)
-    return plannerData.settings.showCompletedBlocks ? blocks : blocks.filter((block) => !block.completed)
-  }, [plannerData.blocks, selectedDate, plannerData.settings.showCompletedBlocks])
+            // Compare with state
+            console.log("📊 Current plannerData in state:", plannerData)
+            console.log("📊 State blocks count:", plannerData.blocks ? plannerData.blocks.length : 0)
 
-  // Get days for the week view
-  const weekDays = useMemo(() => {
-    return getDaysOfWeek(selectedDate)
-  }, [selectedDate])
+            return parsedData
+          } catch (error) {
+            console.error("❌ Error parsing plannerData from localStorage:", error)
+          }
+        } else {
+          console.warn("⚠️ No plannerData found in localStorage")
+        }
+      }
+    } catch (error) {
+      console.error("❌ Error in debugPlannerData:", error)
+      return null
+    }
+    return null
+  }, [plannerData])
 
-  // Add a new time block
-  const addTimeBlock = () => {
+  // Expose debug function to window
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      ;(window as any).debugPlannerData = debugPlannerData
+      ;(window as any).forceSavePlannerData = forceSavePlannerData
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        delete (window as any).debugPlannerData
+        delete (window as any).forceSavePlannerData
+      }
+    }
+  }, [debugPlannerData, forceSavePlannerData])
+
+  // Make sure this function is exposed to the global window object so it can be called from the global save button
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      ;(window as any).forceSavePlannerData = forceSavePlannerData
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        delete (window as any).forceSavePlannerData
+      }
+    }
+  }, [forceSavePlannerData])
+
+  // Add this effect to ensure data is saved when navigating away
+  useEffect(() => {
+    // Save data when component unmounts or before navigation
+    return () => {
+      if (plannerData && dataLoaded.current) {
+        logger.group("📤 Calendar: Component unmounting")
+        logger.info("Calendar component unmounting, saving data...")
+        if (saveTimeout.current) {
+          logger.info("Clearing pending save timeout")
+          clearTimeout(saveTimeout.current)
+          saveTimeout.current = null
+        }
+
+        try {
+          logger.info("Saving data immediately")
+          const dataString = JSON.stringify(plannerData)
+          logger.info(`Data size: ${dataString.length} chars`)
+
+          // Try direct save first for better control
+          if (typeof window !== "undefined") {
+            try {
+              window.localStorage.setItem("plannerData", dataString)
+              logger.success("✅ Data saved directly to localStorage")
+
+              // Verify the save
+              const savedData = window.localStorage.getItem("plannerData")
+              if (savedData) {
+                logger.success(`✅ Verified data was saved (${savedData.length} chars)`)
+
+                // Check if blocks were saved
+                try {
+                  const parsedData = JSON.parse(savedData)
+                  if (Array.isArray(parsedData.blocks)) {
+                    logger.success(`✅ Verified ${parsedData.blocks.length} blocks were saved correctly`)
+                  }
+                } catch (parseError) {
+                  logger.error("❌ Error verifying saved data:", parseError)
+                }
+              } else {
+                logger.error("❌ Failed to verify data was saved")
+                // Fall back to helper
+                setLocalStorage("plannerData", plannerData, true)
+              }
+            } catch (directSaveError) {
+              logger.error("❌ Error with direct save:", directSaveError)
+              // Fall back to helper
+              setLocalStorage("plannerData", plannerData, true)
+            }
+          } else {
+            setLocalStorage("plannerData", plannerData, true) // Force immediate save
+          }
+
+          logger.success("✅ Data saved via setLocalStorage")
+
+          flushLocalStorageWrites() // Ensure writes are processed
+          logger.success("✅ LocalStorage writes flushed")
+
+          // Verify the data was actually saved
+          if (typeof window !== "undefined") {
+            const savedData = window.localStorage.getItem("plannerData")
+            if (savedData) {
+              logger.success(`✅ Verified data was saved (${savedData.length} chars)`)
+            } else {
+              logger.error("❌ Failed to verify data was saved - not found in localStorage after save")
+            }
+          }
+        } catch (error) {
+          logger.error("❌ Error saving data on unmount:", error)
+        }
+        logger.groupEnd()
+      }
+    }
+  }, [plannerData])
+
+  // Modify the addTimeBlock function to show a confirmation and verify the save
+  const addTimeBlock = useCallback(() => {
     if (!newBlock.title) {
       toast({
         title: "Title required",
@@ -596,12 +1127,25 @@ export default function DailyPlannerPage() {
       completed: false,
     }
 
+    // Run the block through the validateBlock function to ensure all properties are valid
+    const validatedBlock = validateBlock(block)
+
+    if (!validatedBlock) {
+      toast({
+        title: "Invalid block data",
+        description: "The time block contains invalid data and cannot be added.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Continue with the rest of the function using the validated block
     // Handle recurring blocks
-    if (block.isRecurring && block.recurringPattern) {
-      const blocksToAdd: TimeBlock[] = [block]
+    if (validatedBlock.isRecurring && validatedBlock.recurringPattern) {
+      const blocksToAdd: TimeBlock[] = [validatedBlock]
 
       // Add recurring blocks for the next 4 weeks
-      const currentDate = new Date(block.date)
+      const currentDate = new Date(validatedBlock.date)
       const endDate = new Date(currentDate)
       endDate.setDate(endDate.getDate() + 28) // 4 weeks ahead
 
@@ -615,7 +1159,7 @@ export default function DailyPlannerPage() {
 
         let shouldAddBlock = false
 
-        switch (block.recurringPattern) {
+        switch (validatedBlock.recurringPattern) {
           case "daily":
             shouldAddBlock = true
             break
@@ -634,21 +1178,42 @@ export default function DailyPlannerPage() {
         }
 
         if (shouldAddBlock) {
-          blocksToAdd.push({
-            ...block,
+          const recurringBlock = {
+            ...validatedBlock,
             id: Date.now().toString() + nextDate.getTime(),
             date: nextDate.toISOString().split("T")[0],
-          })
+          }
+
+          // Validate each recurring block before adding
+          const validatedRecurringBlock = validateBlock(recurringBlock)
+          if (validatedRecurringBlock) {
+            blocksToAdd.push(validatedRecurringBlock)
+          } else {
+            logger.warn(`Skipped invalid recurring block for date ${nextDate.toISOString().split("T")[0]}`)
+          }
         }
 
         nextDate.setDate(nextDate.getDate() + 1)
       }
 
-      const updatedBlocks = [...plannerData.blocks, ...blocksToAdd]
+      // Filter out any null blocks before adding
+      const validBlocksToAdd = blocksToAdd.filter((block) => block !== null)
+
+      // If we have no valid blocks, show an error
+      if (validBlocksToAdd.length === 0) {
+        toast({
+          title: "Invalid recurring blocks",
+          description: "Could not create valid recurring blocks. Please check your input.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      const updatedBlocks = [...plannerData.blocks, ...validBlocksToAdd]
 
       // Update total time blocked
-      const blockDuration = calculateBlockDuration(block.startTime, block.endTime)
-      const updatedTotalTimeBlocked = plannerData.stats.totalTimeBlocked + blockDuration * blocksToAdd.length
+      const blockDuration = calculateBlockDuration(validatedBlock.startTime, validatedBlock.endTime)
+      const updatedTotalTimeBlocked = plannerData.stats.totalTimeBlocked + blockDuration * validBlocksToAdd.length
 
       const updatedData = {
         ...plannerData,
@@ -660,18 +1225,44 @@ export default function DailyPlannerPage() {
         },
       }
 
-      savePlannerData(updatedData)
+      // Update state first
+      setPlannerData(updatedData)
 
-      toast({
-        title: "Recurring blocks added",
-        description: `Added ${blocksToAdd.length} recurring time blocks.`,
-      })
+      // Force an immediate save to ensure data persistence
+      try {
+        // Direct save to localStorage for immediate persistence
+        if (typeof window !== "undefined") {
+          const dataString = JSON.stringify(updatedData)
+          window.localStorage.setItem("plannerData", dataString)
+          console.log("✅ Direct save of recurring blocks successful", updatedData.blocks.length)
+        }
+
+        // Also use the helper function
+        setLocalStorage("plannerData", updatedData, true)
+        flushLocalStorageWrites()
+
+        // Notify other components
+        eventBus.publish("data:plannerData:updated", updatedData)
+        eventBus.publish("data:updated", { collection: "plannerData" })
+
+        toast({
+          title: "Recurring blocks added",
+          description: `Added ${validBlocksToAdd.length} recurring time blocks.`,
+        })
+      } catch (error) {
+        console.error("❌ Error saving recurring blocks:", error)
+        toast({
+          title: "Error saving blocks",
+          description: "There was a problem saving your blocks. Please try again.",
+          variant: "destructive",
+        })
+      }
     } else {
       // Add single block
-      const updatedBlocks = [...plannerData.blocks, block]
+      const updatedBlocks = [...plannerData.blocks, validatedBlock]
 
       // Update total time blocked
-      const blockDuration = calculateBlockDuration(block.startTime, block.endTime)
+      const blockDuration = calculateBlockDuration(validatedBlock.startTime, validatedBlock.endTime)
       const updatedTotalTimeBlocked = plannerData.stats.totalTimeBlocked + blockDuration
 
       const updatedData = {
@@ -684,12 +1275,38 @@ export default function DailyPlannerPage() {
         },
       }
 
-      savePlannerData(updatedData)
+      // Update state first
+      setPlannerData(updatedData)
 
-      toast({
-        title: "Block added",
-        description: "Your time block has been added to your schedule.",
-      })
+      // Force an immediate save to ensure data persistence
+      try {
+        // Direct save to localStorage for immediate persistence
+        if (typeof window !== "undefined") {
+          const dataString = JSON.stringify(updatedData)
+          window.localStorage.setItem("plannerData", dataString)
+          console.log("✅ Direct save of single block successful", updatedData.blocks.length)
+        }
+
+        // Also use the helper function
+        setLocalStorage("plannerData", updatedData, true)
+        flushLocalStorageWrites()
+
+        // Notify other components
+        eventBus.publish("data:plannerData:updated", updatedData)
+        eventBus.publish("data:updated", { collection: "plannerData" })
+
+        toast({
+          title: "Block added",
+          description: "Your time block has been added to your schedule.",
+        })
+      } catch (error) {
+        console.error("❌ Error saving block:", error)
+        toast({
+          title: "Error saving block",
+          description: "There was a problem saving your block. Please try again.",
+          variant: "destructive",
+        })
+      }
     }
 
     // Reset form
@@ -705,10 +1322,45 @@ export default function DailyPlannerPage() {
     })
 
     setIsAddingBlock(false)
-  }
+  }, [newBlock, plannerData, selectedDate, toast, setLocalStorage, flushLocalStorageWrites, eventBus])
+
+  // Add this effect to ensure data is saved when the user leaves the page
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Force immediate save of any pending data
+      if (saveTimeout.current) {
+        clearTimeout(saveTimeout.current)
+        saveTimeout.current = null
+      }
+
+      if (typeof window !== "undefined" && plannerData) {
+        try {
+          const dataString = JSON.stringify(plannerData)
+          window.localStorage.setItem("plannerData", dataString)
+          logger.success("✅ Saved data before unload")
+
+          // Also use the helper function as backup
+          setLocalStorage("plannerData", plannerData, true)
+          flushLocalStorageWrites()
+        } catch (error) {
+          console.error("Failed to save data before unload:", error)
+          // Try the helper function as fallback
+          setLocalStorage("plannerData", plannerData, true)
+          flushLocalStorageWrites()
+        }
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+      // Also save when component unmounts
+      handleBeforeUnload()
+    }
+  }, [plannerData])
 
   // Update an existing time block
-  const updateTimeBlock = () => {
+  const updateTimeBlock = useCallback(() => {
     if (!editingBlock) return
 
     // Validate times
@@ -751,67 +1403,73 @@ export default function DailyPlannerPage() {
       title: "Block updated",
       description: "Your time block has been updated.",
     })
-  }
+  }, [editingBlock, plannerData, savePlannerData, toast])
 
   // Delete a time block
-  const deleteTimeBlock = (blockId: string) => {
-    const blockToDelete = plannerData.blocks.find((block) => block.id === blockId)
-    if (!blockToDelete) return
+  const deleteTimeBlock = useCallback(
+    (blockId: string) => {
+      const blockToDelete = plannerData.blocks.find((block) => block.id === blockId)
+      if (!blockToDelete) return
 
-    // Update total time blocked
-    const blockDuration = calculateBlockDuration(blockToDelete.startTime, blockToDelete.endTime)
-    const updatedTotalTimeBlocked = plannerData.stats.totalTimeBlocked - blockDuration
+      // Update total time blocked
+      const blockDuration = calculateBlockDuration(blockToDelete.startTime, blockToDelete.endTime)
+      const updatedTotalTimeBlocked = plannerData.stats.totalTimeBlocked - blockDuration
 
-    // Update completed blocks count if needed
-    const completedBlocksAdjustment = blockToDelete.completed ? -1 : 0
+      // Update completed blocks count if needed
+      const completedBlocksAdjustment = blockToDelete.completed ? -1 : 0
 
-    const updatedBlocks = plannerData.blocks.filter((block) => block.id !== blockId)
+      const updatedBlocks = plannerData.blocks.filter((block) => block.id !== blockId)
 
-    const updatedData = {
-      ...plannerData,
-      blocks: updatedBlocks,
-      stats: {
-        ...plannerData.stats,
-        totalTimeBlocked: Math.max(0, updatedTotalTimeBlocked),
-        completedBlocks: Math.max(0, plannerData.stats.completedBlocks + completedBlocksAdjustment),
-        lastActiveDate: new Date().toISOString().split("T")[0],
-      },
-    }
+      const updatedData = {
+        ...plannerData,
+        blocks: updatedBlocks,
+        stats: {
+          ...plannerData.stats,
+          totalTimeBlocked: Math.max(0, updatedTotalTimeBlocked),
+          completedBlocks: Math.max(0, plannerData.stats.completedBlocks + completedBlocksAdjustment),
+          lastActiveDate: new Date().toISOString().split("T")[0],
+        },
+      }
 
-    savePlannerData(updatedData)
+      savePlannerData(updatedData)
 
-    toast({
-      title: "Block deleted",
-      description: "Your time block has been deleted.",
-    })
-  }
+      toast({
+        title: "Block deleted",
+        description: "Your time block has been deleted.",
+      })
+    },
+    [plannerData, savePlannerData, toast],
+  )
 
   // Toggle block completion status
-  const toggleBlockCompletion = (blockId: string) => {
-    const updatedBlocks = plannerData.blocks.map((block) => {
-      if (block.id === blockId) {
-        return { ...block, completed: !block.completed }
+  const toggleBlockCompletion = useCallback(
+    (blockId: string) => {
+      const updatedBlocks = plannerData.blocks.map((block) => {
+        if (block.id === blockId) {
+          return { ...block, completed: !block.completed }
+        }
+        return block
+      })
+
+      const completedBlocksAdjustment = updatedBlocks.find((b) => b.id === blockId)?.completed ? 1 : -1
+
+      const updatedData = {
+        ...plannerData,
+        blocks: updatedBlocks,
+        stats: {
+          ...plannerData.stats,
+          completedBlocks: Math.max(0, plannerData.stats.completedBlocks + completedBlocksAdjustment),
+          lastActiveDate: new Date().toISOString().split("T")[0],
+        },
       }
-      return block
-    })
 
-    const completedBlocksAdjustment = updatedBlocks.find((b) => b.id === blockId)?.completed ? 1 : -1
-
-    const updatedData = {
-      ...plannerData,
-      blocks: updatedBlocks,
-      stats: {
-        ...plannerData.stats,
-        completedBlocks: Math.max(0, plannerData.stats.completedBlocks + completedBlocksAdjustment),
-        lastActiveDate: new Date().toISOString().split("T")[0],
-      },
-    }
-
-    savePlannerData(updatedData)
-  }
+      savePlannerData(updatedData)
+    },
+    [plannerData, savePlannerData],
+  )
 
   // Add a new category
-  const addCategory = () => {
+  const addCategory = useCallback(() => {
     if (!newCategory.name) {
       toast({
         title: "Category name required",
@@ -847,46 +1505,63 @@ export default function DailyPlannerPage() {
       title: "Category added",
       description: "Your new category has been added.",
     })
-  }
+  }, [newCategory, plannerData, savePlannerData, toast])
 
   // Delete a category
-  const deleteCategory = (categoryId: string) => {
-    // Don't allow deleting if blocks are using this category
-    const blocksUsingCategory = plannerData.blocks.some((block) => block.category === categoryId)
+  const deleteCategory = useCallback(
+    (categoryId: string) => {
+      // Don't allow deleting if blocks are using this category
+      const blocksUsingCategory = plannerData.blocks.some((block) => block.category === categoryId)
 
-    if (blocksUsingCategory) {
+      if (blocksUsingCategory) {
+        toast({
+          title: "Cannot delete category",
+          description: "This category is being used by one or more time blocks.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      const updatedCategories = plannerData.settings.categories.filter((category) => category.id !== categoryId)
+
+      const updatedData = {
+        ...plannerData,
+        settings: {
+          ...plannerData.settings,
+          categories: updatedCategories,
+        },
+      }
+
+      savePlannerData(updatedData)
+
       toast({
-        title: "Cannot delete category",
-        description: "This category is being used by one or more time blocks.",
+        title: "Category deleted",
+        description: "The category has been deleted.",
+      })
+    },
+    [plannerData, savePlannerData, toast],
+  )
+
+  // Apply a template to the selected date
+  const applyTemplate = useCallback(() => {
+    if (!selectedTemplate) {
+      toast({
+        title: "No template selected",
+        description: "Please select a template to apply.",
         variant: "destructive",
       })
       return
     }
 
-    const updatedCategories = plannerData.settings.categories.filter((category) => category.id !== categoryId)
-
-    const updatedData = {
-      ...plannerData,
-      settings: {
-        ...plannerData.settings,
-        categories: updatedCategories,
-      },
-    }
-
-    savePlannerData(updatedData)
-
-    toast({
-      title: "Category deleted",
-      description: "The category has been deleted.",
-    })
-  }
-
-  // Apply a template to the selected date
-  const applyTemplate = () => {
-    if (!selectedTemplate) return
-
     const template = plannerData.settings.templates.find((t) => t.id === selectedTemplate)
-    if (!template) return
+    if (!template) {
+      toast({
+        title: "Template not found",
+        description: "The selected template could not be found.",
+        variant: "destructive",
+      })
+      return
+    }
 
     const blocksToAdd: TimeBlock[] = template.blocks.map((block) => ({
       ...block,
@@ -917,23 +1592,26 @@ export default function DailyPlannerPage() {
       title: "Template applied",
       description: `Added ${blocksToAdd.length} blocks to your schedule.`,
     })
-  }
+  }, [plannerData, savePlannerData, selectedDate, selectedTemplate, toast])
 
   // Update settings
-  const updateSettings = (settings: PlannerSettings) => {
-    const updatedData = {
-      ...plannerData,
-      settings,
-    }
+  const updateSettings = useCallback(
+    (settings: PlannerSettings) => {
+      const updatedData = {
+        ...plannerData,
+        settings,
+      }
 
-    savePlannerData(updatedData)
-    setIsSettingsOpen(false)
+      savePlannerData(updatedData)
+      setIsSettingsOpen(false)
 
-    toast({
-      title: "Settings updated",
-      description: "Your planner settings have been updated.",
-    })
-  }
+      toast({
+        title: "Settings updated",
+        description: "Your planner settings have been updated.",
+      })
+    },
+    [plannerData, savePlannerData, toast],
+  )
 
   // Calculate productivity score (0-100)
   const calculateProductivityScore = (): number => {
@@ -955,6 +1633,50 @@ export default function DailyPlannerPage() {
     return Math.round((totalMinutes / 60) * 10) / 10 // Round to 1 decimal place
   }
 
+  const timeSlots = useMemo(
+    () => generateTimeSlots(plannerData.settings.dayStartHour, plannerData.settings.dayEndHour),
+    [plannerData.settings.dayStartHour, plannerData.settings.dayEndHour],
+  )
+  const weekDays = useMemo(() => getDaysOfWeek(selectedDate), [selectedDate])
+  const blocksForSelectedDate = useMemo(
+    () => getTimeBlocksForDate(plannerData.blocks, selectedDate),
+    [plannerData.blocks, selectedDate],
+  )
+  const updateStreak = useCallback(
+    (data: PlannerData) => {
+      const today = new Date().toISOString().split("T")[0]
+      if (data.stats.lastActiveDate === today) {
+        return // Already updated today
+      }
+
+      if (data.stats.lastActiveDate === getPreviousDay(today)) {
+        // Increase streak
+        const updatedData = {
+          ...data,
+          stats: {
+            ...data.stats,
+            streak: data.stats.streak + 1,
+            lastActiveDate: today,
+          },
+        }
+        savePlannerData(updatedData)
+      } else {
+        // Reset streak
+        const updatedData = {
+          ...data,
+          stats: {
+            ...data.stats,
+            streak: 1,
+            lastActiveDate: today,
+          },
+        }
+        savePlannerData(updatedData)
+      }
+    },
+    [savePlannerData],
+  )
+
+  // The rest of the component remains the same...
   return (
     <div className="container mx-auto p-4 md:p-6">
       <div className="mb-6 sticky top-0 z-10 bg-background pt-2 pb-4 border-b">
@@ -1009,6 +1731,8 @@ export default function DailyPlannerPage() {
         </div>
       </div>
 
+      {/* Rest of the component... */}
+      {/* This would be the same as the original component */}
       <div className="grid grid-cols-1 gap-4 md:gap-6 md:grid-cols-4">
         {/* Sidebar */}
         <div className="md:col-span-1">
@@ -1590,756 +2314,488 @@ export default function DailyPlannerPage() {
         </div>
       </div>
 
-      {/* Add Time Block Dialog */}
-      <Dialog open={isAddingBlock} onOpenChange={setIsAddingBlock}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Add Time Block</DialogTitle>
-            <DialogDescription>Create a new time block for your schedule.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="title">Title</Label>
-              <Input
-                id="title"
-                value={newBlock.title}
-                onChange={(e) => setNewBlock({ ...newBlock, title: e.target.value })}
-                placeholder="e.g., Deep Work Session, Team Meeting"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="description">Description (optional)</Label>
-              <Textarea
-                id="description"
-                value={newBlock.description}
-                onChange={(e) => setNewBlock({ ...newBlock, description: e.target.value })}
-                placeholder="Add details about this time block"
-                rows={2}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="startTime">Start Time</Label>
-                <div className="relative flex items-center">
+      {/* Add/Edit Time Block Dialog */}
+      {(isAddingBlock || editingBlock) && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-background border rounded-lg shadow-lg w-full max-w-md p-6 animate-in fade-in-0 zoom-in-95">
+            <h2 className="text-xl font-bold mb-4">{editingBlock ? "Edit Time Block" : "Add Time Block"}</h2>
+
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="title" className="block text-sm font-medium mb-1">
+                  Title
+                </label>
+                <Input
+                  id="title"
+                  value={editingBlock ? editingBlock.title : newBlock.title}
+                  onChange={(e) => {
+                    if (editingBlock) {
+                      setEditingBlock({ ...editingBlock, title: e.target.value })
+                    } else {
+                      setNewBlock({ ...newBlock, title: e.target.value })
+                    }
+                  }}
+                  placeholder="Meeting, Study session, etc."
+                />
+              </div>
+
+              <div>
+                <label htmlFor="description" className="block text-sm font-medium mb-1">
+                  Description (optional)
+                </label>
+                <Input
+                  id="description"
+                  value={editingBlock ? editingBlock.description : newBlock.description}
+                  onChange={(e) => {
+                    if (editingBlock) {
+                      setEditingBlock({ ...editingBlock, description: e.target.value })
+                    } else {
+                      setNewBlock({ ...newBlock, description: e.target.value })
+                    }
+                  }}
+                  placeholder="Additional details about this block"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="date" className="block text-sm font-medium mb-1">
+                    Date
+                  </label>
+                  <Input
+                    id="date"
+                    type="date"
+                    value={editingBlock ? editingBlock.date : newBlock.date}
+                    onChange={(e) => {
+                      if (editingBlock) {
+                        setEditingBlock({ ...editingBlock, date: e.target.value })
+                      } else {
+                        setNewBlock({ ...newBlock, date: e.target.value })
+                      }
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="category" className="block text-sm font-medium mb-1">
+                    Category
+                  </label>
+                  <select
+                    id="category"
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
+                    value={editingBlock ? editingBlock.category : newBlock.category}
+                    onChange={(e) => {
+                      if (editingBlock) {
+                        setEditingBlock({ ...editingBlock, category: e.target.value })
+                      } else {
+                        setNewBlock({ ...newBlock, category: e.target.value })
+                      }
+                    }}
+                  >
+                    {plannerData.settings.categories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="startTime" className="block text-sm font-medium mb-1">
+                    Start Time
+                  </label>
                   <Input
                     id="startTime"
                     type="time"
-                    value={newBlock.startTime}
-                    onChange={(e) => setNewBlock({ ...newBlock, startTime: e.target.value })}
-                    className="pr-10"
+                    value={editingBlock ? editingBlock.startTime : newBlock.startTime}
+                    onChange={(e) => {
+                      if (editingBlock) {
+                        setEditingBlock({ ...editingBlock, startTime: e.target.value })
+                      } else {
+                        setNewBlock({ ...newBlock, startTime: e.target.value })
+                      }
+                    }}
                   />
-                  <div className="absolute right-1 flex flex-col gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5 text-muted-foreground"
-                      onClick={() => {
-                        // Increment time by 15 minutes
-                        const [hours, minutes] = newBlock.startTime.split(":").map(Number)
-                        let newMinutes = minutes + 15
-                        let newHours = hours
-                        if (newMinutes >= 60) {
-                          newHours = (newHours + 1) % 24
-                          newMinutes = newMinutes % 60
-                        }
-                        setNewBlock({
-                          ...newBlock,
-                          startTime: `${newHours.toString().padStart(2, "0")}:${newMinutes.toString().padStart(2, "0")}`,
-                        })
-                      }}
-                    >
-                      <ChevronUp className="h-3 w-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5 text-muted-foreground"
-                      onClick={() => {
-                        // Decrement time by 15 minutes
-                        const [hours, minutes] = newBlock.startTime.split(":").map(Number)
-                        let newMinutes = minutes - 15
-                        let newHours = hours
-                        if (newMinutes < 0) {
-                          newHours = (newHours - 1 + 24) % 24
-                          newMinutes = newMinutes + 60
-                        }
-                        setNewBlock({
-                          ...newBlock,
-                          startTime: `${newHours.toString().padStart(2, "0")}:${newMinutes.toString().padStart(2, "0")}`,
-                        })
-                      }}
-                    >
-                      <ChevronDown className="h-3 w-3" />
-                    </Button>
-                  </div>
                 </div>
-              </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="endTime">End Time</Label>
-                <div className="relative flex items-center">
+                <div>
+                  <label htmlFor="endTime" className="block text-sm font-medium mb-1">
+                    End Time
+                  </label>
                   <Input
                     id="endTime"
                     type="time"
-                    value={newBlock.endTime}
-                    onChange={(e) => setNewBlock({ ...newBlock, endTime: e.target.value })}
-                    className="pr-10"
-                  />
-                  <div className="absolute right-1 flex flex-col gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5 text-muted-foreground"
-                      onClick={() => {
-                        // Increment time by 15 minutes
-                        const [hours, minutes] = newBlock.endTime.split(":").map(Number)
-                        let newMinutes = minutes + 15
-                        let newHours = hours
-                        if (newMinutes >= 60) {
-                          newHours = (newHours + 1) % 24
-                          newMinutes = newMinutes % 60
-                        }
-                        setNewBlock({
-                          ...newBlock,
-                          endTime: `${newHours.toString().padStart(2, "0")}:${newMinutes.toString().padStart(2, "0")}`,
-                        })
-                      }}
-                    >
-                      <ChevronUp className="h-3 w-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5 text-muted-foreground"
-                      onClick={() => {
-                        // Decrement time by 15 minutes
-                        const [hours, minutes] = newBlock.endTime.split(":").map(Number)
-                        let newMinutes = minutes - 15
-                        let newHours = hours
-                        if (newMinutes < 0) {
-                          newHours = (newHours - 1 + 24) % 24
-                          newMinutes = newMinutes + 60
-                        }
-                        setNewBlock({
-                          ...newBlock,
-                          endTime: `${newHours.toString().padStart(2, "0")}:${newMinutes.toString().padStart(2, "0")}`,
-                        })
-                      }}
-                    >
-                      <ChevronDown className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="date">Date</Label>
-                <Input
-                  id="date"
-                  type="date"
-                  value={newBlock.date}
-                  onChange={(e) => setNewBlock({ ...newBlock, date: e.target.value })}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="category">Category</Label>
-                <Select
-                  value={newBlock.category}
-                  onValueChange={(value) => setNewBlock({ ...newBlock, category: value })}
-                >
-                  <SelectTrigger id="category">
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {plannerData.settings.categories.map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        <div className="flex items-center">
-                          <div className={`mr-2 h-2 w-2 rounded-full ${category.color}`} />
-                          {category.name}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label>Color</Label>
-              <div className="flex flex-wrap gap-2" role="radiogroup">
-                {[
-                  "bg-blue-500",
-                  "bg-green-500",
-                  "bg-red-500",
-                  "bg-purple-500",
-                  "bg-yellow-500",
-                  "bg-pink-500",
-                  "bg-indigo-500",
-                  "bg-gray-500",
-                ].map((color) => (
-                  <div
-                    key={color}
-                    role="radio"
-                    aria-checked={newBlock.color === color}
-                    tabIndex={0}
-                    className={`h-8 w-8 cursor-pointer rounded-full ${color} ${
-                      newBlock.color === color ? "ring-2 ring-primary ring-offset-2" : ""
-                    }`}
-                    onClick={() => setNewBlock({ ...newBlock, color })}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        setNewBlock({ ...newBlock, color })
+                    value={editingBlock ? editingBlock.endTime : newBlock.endTime}
+                    onChange={(e) => {
+                      if (editingBlock) {
+                        setEditingBlock({ ...editingBlock, endTime: e.target.value })
+                      } else {
+                        setNewBlock({ ...newBlock, endTime: e.target.value })
                       }
                     }}
                   />
-                ))}
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="recurring" className="flex-1">
-                Recurring
-              </Label>
-              <div className="flex items-center gap-4">
-                <input
-                  id="recurring"
-                  type="checkbox"
-                  checked={newBlock.isRecurring}
-                  onChange={(e) => setNewBlock({ ...newBlock, isRecurring: e.target.checked })}
-                  className="h-4 w-4 rounded border-gray-300"
-                />
-              </div>
-            </div>
-            {newBlock.isRecurring && (
-              <div className="grid gap-2">
-                <Label htmlFor="recurringPattern">Recurring Pattern</Label>
-                <Select
-                  value={newBlock.recurringPattern || "daily"}
-                  onValueChange={(value: "daily" | "weekly" | "monthly" | "weekdays" | "weekends") =>
-                    setNewBlock({ ...newBlock, recurringPattern: value })
-                  }
-                >
-                  <SelectTrigger id="recurringPattern">
-                    <SelectValue placeholder="Select pattern" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="weekdays">Weekdays (Mon-Fri)</SelectItem>
-                    <SelectItem value="weekends">Weekends (Sat-Sun)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddingBlock(false)}>
-              Cancel
-            </Button>
-            <Button onClick={addTimeBlock}>Add Block</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Edit Time Block Dialog */}
-      <Dialog open={!!editingBlock} onOpenChange={(open) => !open && setEditingBlock(null)}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Edit Time Block</DialogTitle>
-            <DialogDescription>Update the details of your time block.</DialogDescription>
-          </DialogHeader>
-          {editingBlock && (
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="edit-title">Title</Label>
-                <Input
-                  id="edit-title"
-                  value={editingBlock.title}
-                  onChange={(e) => setEditingBlock({ ...editingBlock, title: e.target.value })}
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="isRecurring"
+                  className="mr-2"
+                  checked={editingBlock ? editingBlock.isRecurring : newBlock.isRecurring}
+                  onChange={(e) => {
+                    if (editingBlock) {
+                      setEditingBlock({ ...editingBlock, isRecurring: e.target.checked })
+                    } else {
+                      setNewBlock({ ...newBlock, isRecurring: e.target.checked })
+                    }
+                  }}
                 />
+                <label htmlFor="isRecurring" className="text-sm font-medium">
+                  Recurring Event
+                </label>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-description">Description (optional)</Label>
-                <Textarea
-                  id="edit-description"
-                  value={editingBlock.description}
-                  onChange={(e) => setEditingBlock({ ...editingBlock, description: e.target.value })}
-                  rows={2}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-startTime">Start Time</Label>
-                  <Input
-                    id="edit-startTime"
-                    type="time"
-                    value={editingBlock.startTime}
-                    onChange={(e) => setEditingBlock({ ...editingBlock, startTime: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-endTime">End Time</Label>
-                  <Input
-                    id="edit-endTime"
-                    type="time"
-                    value={editingBlock.endTime}
-                    onChange={(e) => setEditingBlock({ ...editingBlock, endTime: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-date">Date</Label>
-                  <Input
-                    id="edit-date"
-                    type="date"
-                    value={editingBlock.date}
-                    onChange={(e) => setEditingBlock({ ...editingBlock, date: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-category">Category</Label>
-                  <Select
-                    value={editingBlock.category}
-                    onChange={(value) => setEditingBlock({ ...editingBlock, category: value })}
+
+              {(editingBlock?.isRecurring || newBlock.isRecurring) && (
+                <div>
+                  <label htmlFor="recurringPattern" className="block text-sm font-medium mb-1">
+                    Recurring Pattern
+                  </label>
+                  <select
+                    id="recurringPattern"
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
+                    value={
+                      editingBlock ? editingBlock.recurringPattern || "daily" : newBlock.recurringPattern || "daily"
+                    }
+                    onChange={(e) => {
+                      const pattern = e.target.value as "daily" | "weekly" | "monthly" | "weekdays" | "weekends"
+                      if (editingBlock) {
+                        setEditingBlock({ ...editingBlock, recurringPattern: pattern })
+                      } else {
+                        setNewBlock({ ...newBlock, recurringPattern: pattern })
+                      }
+                    }}
                   >
-                    <SelectTrigger id="edit-category">
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {plannerData.settings.categories.map((category) => (
-                        <SelectItem key={category.id} value={category.id}>
-                          <div className="flex items-center">
-                            <div className={`mr-2 h-2 w-2 rounded-full ${category.color}`} />
-                            {category.name}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="weekdays">Weekdays</option>
+                    <option value="weekends">Weekends</option>
+                  </select>
                 </div>
-              </div>
-              <div className="grid gap-2">
-                <Label>Color</Label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    "bg-blue-500",
-                    "bg-green-500",
-                    "bg-red-500",
-                    "bg-purple-500",
-                    "bg-yellow-500",
-                    "bg-pink-500",
-                    "bg-indigo-500",
-                    "bg-gray-500",
-                  ].map((color) => (
-                    <div
-                      key={color}
-                      className={`h-8 w-8 cursor-pointer rounded-full ${color} ${
-                        editingBlock.color === color ? "ring-2 ring-primary ring-offset-2" : ""
-                      }`}
-                      onClick={() => setEditingBlock({ ...editingBlock, color })}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="edit-completed" className="flex-1">
-                  Completed
-                </Label>
-                <div className="flex items-center gap-4">
-                  <input
-                    id="edit-completed"
-                    type="checkbox"
-                    checked={editingBlock.completed}
-                    onChange={(e) => setEditingBlock({ ...editingBlock, completed: e.target.checked })}
-                    className="h-4 w-4 rounded border-gray-300"
-                  />
-                </div>
-              </div>
+              )}
             </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingBlock(null)}>
-              Cancel
-            </Button>
-            <Button onClick={updateTimeBlock}>Save Changes</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsAddingBlock(false)
+                  setEditingBlock(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={editingBlock ? updateTimeBlock : addTimeBlock}>{editingBlock ? "Update" : "Add"}</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Settings Dialog */}
-      <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>Planner Settings</DialogTitle>
-            <DialogDescription>Customize your daily planner experience.</DialogDescription>
-          </DialogHeader>
-          <Tabs defaultValue="general">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="general">General</TabsTrigger>
-              <TabsTrigger value="categories">Categories</TabsTrigger>
-              <TabsTrigger value="templates">Templates</TabsTrigger>
-            </TabsList>
-            <TabsContent value="general" className="space-y-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="dayStartHour">Day Start Hour</Label>
-                <Select
-                  value={plannerData.settings.dayStartHour.toString()}
-                  onValueChange={(value) => {
-                    const updatedSettings = {
-                      ...plannerData.settings,
-                      dayStartHour: Number.parseInt(value),
-                    }
-                    savePlannerData({
-                      ...plannerData,
-                      settings: updatedSettings,
-                    })
-                  }}
-                >
-                  <SelectTrigger id="dayStartHour">
-                    <SelectValue placeholder="Select start hour" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: 12 }, (_, i) => i).map((hour) => (
-                      <SelectItem key={hour} value={hour.toString()}>
-                        {hour === 0 ? "12 AM" : hour < 12 ? `${hour} AM` : "12 PM"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="dayEndHour">Day End Hour</Label>
-                <Select
-                  value={plannerData.settings.dayEndHour.toString()}
-                  onValueChange={(value) => {
-                    const updatedSettings = {
-                      ...plannerData.settings,
-                      dayEndHour: Number.parseInt(value),
-                    }
-                    savePlannerData({
-                      ...plannerData,
-                      settings: updatedSettings,
-                    })
-                  }}
-                >
-                  <SelectTrigger id="dayEndHour">
-                    <SelectValue placeholder="Select end hour" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: 12 }, (_, i) => i + 12).map((hour) => (
-                      <SelectItem key={hour} value={hour.toString()}>
-                        {hour === 12 ? "12 PM" : hour < 24 ? `${hour - 12} PM` : "12 AM"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="timeSlotHeight">Time Slot Height (pixels)</Label>
-                <Input
-                  id="timeSlotHeight"
-                  type="number"
-                  min="40"
-                  max="120"
-                  step="10"
-                  value={plannerData.settings.timeSlotHeight}
-                  onChange={(e) => {
-                    const updatedSettings = {
-                      ...plannerData.settings,
-                      timeSlotHeight: Number.parseInt(e.target.value) || 80,
-                    }
-                    savePlannerData({
-                      ...plannerData,
-                      settings: updatedSettings,
-                    })
-                  }}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="defaultBlockDuration">Default Block Duration (minutes)</Label>
-                <Select
-                  value={plannerData.settings.defaultBlockDuration.toString()}
-                  onValueChange={(value) => {
-                    const updatedSettings = {
-                      ...plannerData.settings,
-                      defaultBlockDuration: Number.parseInt(value),
-                    }
-                    savePlannerData({
-                      ...plannerData,
-                      settings: updatedSettings,
-                    })
-                  }}
-                >
-                  <SelectTrigger id="defaultBlockDuration">
-                    <SelectValue placeholder="Select duration" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[15, 30, 45, 60, 90, 120].map((duration) => (
-                      <SelectItem key={duration} value={duration.toString()}>
-                        {duration} minutes
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="showCompletedBlocks" className="flex-1">
-                  Show Completed Blocks
-                </Label>
-                <div className="flex items-center gap-4">
+      {isSettingsOpen && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-background border rounded-lg shadow-lg w-full max-w-3xl p-6 animate-in fade-in-0 zoom-in-95 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">Planner Settings</h2>
+
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-base font-medium mb-2">Display Settings</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="dayStartHour" className="block text-sm font-medium mb-1">
+                      Day Start Hour
+                    </label>
+                    <Input
+                      id="dayStartHour"
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={plannerData.settings.dayStartHour}
+                      onChange={(e) => {
+                        const value = Number(e.target.value)
+                        if (!isNaN(value) && value >= 0 && value <= 23) {
+                          updateSettings({
+                            ...plannerData.settings,
+                            dayStartHour: value,
+                          })
+                        }
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="dayEndHour" className="block text-sm font-medium mb-1">
+                      Day End Hour
+                    </label>
+                    <Input
+                      id="dayEndHour"
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={plannerData.settings.dayEndHour}
+                      onChange={(e) => {
+                        const value = Number(e.target.value)
+                        if (!isNaN(value) && value >= 0 && value <= 23) {
+                          updateSettings({
+                            ...plannerData.settings,
+                            dayEndHour: value,
+                          })
+                        }
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="timeSlotHeight" className="block text-sm font-medium mb-1">
+                      Time Slot Height (px)
+                    </label>
+                    <Input
+                      id="timeSlotHeight"
+                      type="number"
+                      min={40}
+                      max={200}
+                      value={plannerData.settings.timeSlotHeight}
+                      onChange={(e) => {
+                        const value = Number(e.target.value)
+                        if (!isNaN(value) && value >= 40 && value <= 200) {
+                          updateSettings({
+                            ...plannerData.settings,
+                            timeSlotHeight: value,
+                          })
+                        }
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="defaultBlockDuration" className="block text-sm font-medium mb-1">
+                      Default Block Duration (minutes)
+                    </label>
+                    <Input
+                      id="defaultBlockDuration"
+                      type="number"
+                      min={5}
+                      max={240}
+                      step={5}
+                      value={plannerData.settings.defaultBlockDuration}
+                      onChange={(e) => {
+                        const value = Number(e.target.value)
+                        if (!isNaN(value) && value >= 5 && value <= 240) {
+                          updateSettings({
+                            ...plannerData.settings,
+                            defaultBlockDuration: value,
+                          })
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center">
                   <input
-                    id="showCompletedBlocks"
                     type="checkbox"
+                    id="showCompletedBlocks"
+                    className="mr-2"
                     checked={plannerData.settings.showCompletedBlocks}
                     onChange={(e) => {
-                      const updatedSettings = {
+                      updateSettings({
                         ...plannerData.settings,
                         showCompletedBlocks: e.target.checked,
-                      }
-                      savePlannerData({
-                        ...plannerData,
-                        settings: updatedSettings,
                       })
                     }}
-                    className="h-4 w-4 rounded border-gray-300"
                   />
+                  <label htmlFor="showCompletedBlocks" className="text-sm font-medium">
+                    Show Completed Blocks
+                  </label>
                 </div>
               </div>
-            </TabsContent>
-            <TabsContent value="categories" className="space-y-4 py-4">
-              <div className="space-y-4">
-                <div className="rounded-md border">
-                  <div className="p-4">
-                    <h3 className="text-sm font-medium">Current Categories</h3>
-                  </div>
-                  <div className="p-4 pt-0">
-                    {plannerData.settings.categories.map((category) => (
-                      <div key={category.id} className="flex items-center justify-between py-1">
-                        <div className="flex items-center gap-2">
-                          <div className={`h-3 w-3 rounded-full ${category.color} flex-shrink-0`} />
-                          <span className="text-sm truncate">{category.name}</span>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => deleteCategory(category.id)}
-                        >
-                          <Trash className="h-4 w-4" />
-                        </Button>
+
+              <div>
+                <h3 className="text-base font-medium mb-2">Categories</h3>
+                <div className="space-y-2 max-h-[200px] overflow-y-auto border rounded-md p-2">
+                  {plannerData.settings.categories.map((category) => (
+                    <div key={category.id} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-4 w-4 rounded-full ${category.color}`} />
+                        <span>{category.name}</span>
                       </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-md border p-4">
-                  <h3 className="mb-4 text-sm font-medium">Add New Category</h3>
-                  <div className="grid gap-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="categoryName">Category Name</Label>
-                      <Input
-                        id="categoryName"
-                        value={newCategory.name}
-                        onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
-                        placeholder="e.g., Meetings, Exercise"
-                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => deleteCategory(category.id)}
+                      >
+                        <Trash className="h-4 w-4" />
+                      </Button>
                     </div>
-                    <div className="grid gap-2">
-                      <Label>Color</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          "bg-blue-500",
-                          "bg-green-500",
-                          "bg-red-500",
-                          "bg-purple-500",
-                          "bg-yellow-500",
-                          "bg-pink-500",
-                          "bg-indigo-500",
-                          "bg-gray-500",
-                        ].map((color) => (
-                          <div
-                            key={color}
-                            className={`h-8 w-8 cursor-pointer rounded-full ${color} ${
-                              newCategory.color === color ? "ring-2 ring-primary ring-offset-2" : ""
-                            }`}
-                            onClick={() => setNewCategory({ ...newCategory, color })}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                    <Button onClick={addCategory}>Add Category</Button>
-                  </div>
+                  ))}
                 </div>
-              </div>
-            </TabsContent>
-            <TabsContent value="templates" className="space-y-4 py-4">
-              <div className="space-y-4">
-                <div className="rounded-md border">
-                  <div className="p-4">
-                    <h3 className="text-sm font-medium">Available Templates</h3>
+                <div className="mt-4 flex items-end gap-2">
+                  <div className="flex-1">
+                    <label htmlFor="newCategoryName" className="block text-sm font-medium mb-1">
+                      New Category Name
+                    </label>
+                    <Input
+                      id="newCategoryName"
+                      value={newCategory.name}
+                      onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+                      placeholder="Work, Personal, etc."
+                    />
                   </div>
-                  <ScrollArea className="h-[200px] p-4 pt-0">
-                    {plannerData.settings.templates.map((template) => (
-                      <div key={template.id} className="mb-4 rounded-md border p-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <h4 className="font-medium">{template.name}</h4>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => {
-                                // Clone template to selected date
-                                const blocksToAdd: TimeBlock[] = template.blocks.map((block) => ({
-                                  ...block,
-                                  id: Date.now().toString() + Math.random().toString(36).substring(2),
-                                  date: selectedDate,
-                                  completed: false,
-                                }))
-
-                                // Calculate total duration of new blocks
-                                const totalDuration = blocksToAdd.reduce((total, block) => {
-                                  return total + calculateBlockDuration(block.startTime, block.endTime)
-                                }, 0)
-
-                                const updatedData = {
-                                  ...plannerData,
-                                  blocks: [...plannerData.blocks, ...blocksToAdd],
-                                  stats: {
-                                    ...plannerData.stats,
-                                    totalTimeBlocked: plannerData.stats.totalTimeBlocked + totalDuration,
-                                    lastActiveDate: new Date().toISOString().split("T")[0],
-                                  },
-                                }
-
-                                savePlannerData(updatedData)
-                                setIsSettingsOpen(false)
-
-                                toast({
-                                  title: "Template applied",
-                                  description: `Added ${blocksToAdd.length} blocks to your schedule.`,
-                                })
-                              }}
-                            >
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => {
-                                // Delete template
-                                const updatedTemplates = plannerData.settings.templates.filter(
-                                  (t) => t.id !== template.id,
-                                )
-
-                                const updatedData = {
-                                  ...plannerData,
-                                  settings: {
-                                    ...plannerData.settings,
-                                    templates: updatedTemplates,
-                                  },
-                                }
-
-                                savePlannerData(updatedData)
-
-                                toast({
-                                  title: "Template deleted",
-                                  description: "The template has been deleted.",
-                                })
-                              }}
-                            >
-                              <Trash className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          {template.blocks.map((block, index) => (
-                            <div key={index} className="flex items-center gap-2 text-sm">
-                              <div className={`h-2 w-2 rounded-full ${block.color}`} />
-                              <span>{block.title}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {formatTime(block.startTime)} - {formatTime(block.endTime)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </ScrollArea>
-                </div>
-                <div className="rounded-md border p-4">
-                  <h3 className="mb-4 text-sm font-medium">Save Current Day as Template</h3>
-                  <div className="grid gap-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="templateName">Template Name</Label>
-                      <Input id="templateName" placeholder="e.g., Productive Workday, Weekend Routine" />
-                    </div>
-                    <Button
-                      onClick={() => {
-                        const templateName = (document.getElementById("templateName") as HTMLInputElement).value
-
-                        if (!templateName) {
-                          toast({
-                            title: "Template name required",
-                            description: "Please provide a name for your template.",
-                            variant: "destructive",
-                          })
-                          return
-                        }
-
-                        const blocksForTemplate = plannerData.blocks
-                          .filter((block) => block.date === selectedDate)
-                          .map(({ id, date, completed, ...rest }) => rest)
-
-                        if (blocksForTemplate.length === 0) {
-                          toast({
-                            title: "No blocks to save",
-                            description: "There are no time blocks on the selected date to save as a template.",
-                            variant: "destructive",
-                          })
-                          return
-                        }
-
-                        const newTemplate: Template = {
-                          id: Date.now().toString(),
-                          name: templateName,
-                          blocks: blocksForTemplate,
-                        }
-
-                        const updatedData = {
-                          ...plannerData,
-                          settings: {
-                            ...plannerData.settings,
-                            templates: [...plannerData.settings.templates, newTemplate],
-                          },
-                        }
-
-                        savePlannerData(updatedData)(
-                          // Clear input
-                          document.getElementById("templateName") as HTMLInputElement,
-                        ).value = ""
-
-                        toast({
-                          title: "Template saved",
-                          description: "Your current day has been saved as a template.",
-                        })
-                      }}
+                  <div>
+                    <label htmlFor="newCategoryColor" className="block text-sm font-medium mb-1">
+                      Color
+                    </label>
+                    <select
+                      id="newCategoryColor"
+                      className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm transition-colors"
+                      value={newCategory.color}
+                      onChange={(e) => setNewCategory({ ...newCategory, color: e.target.value })}
                     >
-                      <Save className="mr-2 h-4 w-4" />
-                      Save as Template
-                    </Button>
+                      <option value="bg-blue-500">Blue</option>
+                      <option value="bg-green-500">Green</option>
+                      <option value="bg-red-500">Red</option>
+                      <option value="bg-yellow-500">Yellow</option>
+                      <option value="bg-purple-500">Purple</option>
+                      <option value="bg-pink-500">Pink</option>
+                      <option value="bg-indigo-500">Indigo</option>
+                      <option value="bg-orange-500">Orange</option>
+                      <option value="bg-teal-500">Teal</option>
+                      <option value="bg-gray-500">Gray</option>
+                    </select>
                   </div>
+                  <Button onClick={addCategory}>Add</Button>
                 </div>
               </div>
-            </TabsContent>
-          </Tabs>
-          <DialogFooter>
-            <Button onClick={() => setIsSettingsOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
+              <div>
+                <h3 className="text-base font-medium mb-2">Templates</h3>
+                <div className="space-y-4 max-h-[300px] overflow-y-auto border rounded-md p-2">
+                  {plannerData.settings.templates.map((template) => (
+                    <div key={template.id} className="border-b pb-2 last:border-b-0 last:pb-0">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium">{template.name}</h4>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => {
+                              setSelectedTemplate(template.id)
+                              applyTemplate()
+                              setIsSettingsOpen(false)
+                            }}
+                          >
+                            <Calendar className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => {
+                              // Remove template
+                              const updatedTemplates = plannerData.settings.templates.filter(
+                                (t) => t.id !== template.id,
+                              )
+                              updateSettings({
+                                ...plannerData.settings,
+                                templates: updatedTemplates,
+                              })
+                            }}
+                          >
+                            <Trash className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-sm text-muted-foreground">{template.blocks.length} blocks</div>
+                      <div className="mt-2 space-y-1">
+                        {template.blocks.slice(0, 3).map((block, index) => (
+                          <div key={index} className="text-xs flex items-center gap-1">
+                            <div
+                              className={`h-2 w-2 rounded-full ${
+                                plannerData.settings.categories.find((c) => c.id === block.category)?.color ||
+                                block.color
+                              }`}
+                            />
+                            <span className="truncate">
+                              {block.title} ({formatTime(block.startTime)} - {formatTime(block.endTime)})
+                            </span>
+                          </div>
+                        ))}
+                        {template.blocks.length > 3 && (
+                          <div className="text-xs text-muted-foreground">
+                            +{template.blocks.length - 3} more blocks...
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      // Create a new template from the current day's blocks
+                      const blocksToday = plannerData.blocks.filter((block) => block.date === selectedDate)
+                      if (blocksToday.length === 0) {
+                        toast({
+                          title: "No blocks found",
+                          description: "There are no time blocks on the selected date to save as a template.",
+                          variant: "destructive",
+                        })
+                        return
+                      }
+
+                      // Prompt for template name
+                      const templateName = window.prompt("Enter a name for this template:")
+                      if (!templateName) return
+
+                      // Create template
+                      const newTemplate: Template = {
+                        id: Date.now().toString(),
+                        name: templateName,
+                        blocks: blocksToday.map(({ id, date, completed, ...rest }) => rest),
+                      }
+
+                      // Add to settings
+                      updateSettings({
+                        ...plannerData.settings,
+                        templates: [...plannerData.settings.templates, newTemplate],
+                      })
+
+                      toast({
+                        title: "Template created",
+                        description: `Saved ${blocksToday.length} blocks as template "${templateName}".`,
+                      })
+                    }}
+                  >
+                    Save Current Day as Template
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <Button variant="outline" onClick={() => setIsSettingsOpen(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add this at the end, right before the closing div */}
+      <PlannerDataIntegrityCheck />
     </div>
   )
 }

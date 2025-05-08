@@ -14,112 +14,90 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { Loader2 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
-import { useToast } from "@/components/ui/use-toast"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface SignupModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSwitchToLogin: () => void
+  onSignupSuccess?: (email: string) => void
 }
 
-export function SignupModal({ open, onOpenChange, onSwitchToLogin }: SignupModalProps) {
-  const [username, setUsername] = useState("")
+export function SignupModal({ open, onOpenChange, onSwitchToLogin, onSignupSuccess }: SignupModalProps) {
+  const [email, setEmail] = useState("")
+  const [firstName, setFirstName] = useState("")
+  const [lastName, setLastName] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState("")
   const { signup } = useAuth()
-  const { toast } = useToast()
+
+  const resetForm = () => {
+    setEmail("")
+    setFirstName("")
+    setLastName("")
+    setPassword("")
+    setConfirmPassword("")
+    setError("")
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError("")
 
-    if (!username.trim()) {
-      toast({
-        title: "Username Required",
-        description: "Please choose a username",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (username.length < 3 || username.length > 20) {
-      toast({
-        title: "Invalid Username",
-        description: "Username must be between 3 and 20 characters",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-      toast({
-        title: "Invalid Username",
-        description: "Username can only contain letters, numbers, and underscores",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!password) {
-      toast({
-        title: "Password Required",
-        description: "Please choose a password",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (password.length < 6) {
-      toast({
-        title: "Password Too Short",
-        description: "Password must be at least 6 characters long",
-        variant: "destructive",
-      })
+    // Basic validation
+    if (!email || !password) {
+      setError("Email and password are required")
       return
     }
 
     if (password !== confirmPassword) {
-      toast({
-        title: "Passwords Don't Match",
-        description: "Please make sure your passwords match",
-        variant: "destructive",
-      })
+      setError("Passwords do not match")
+      return
+    }
+
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters")
       return
     }
 
     setIsLoading(true)
 
     try {
-      const success = await signup(username, password)
+      // Simple signup call
+      const success = await signup(email, firstName, lastName, password)
 
       if (success) {
-        toast({
-          title: "Account Created",
-          description: "Your account has been created and you are now logged in",
-        })
+        resetForm()
         onOpenChange(false)
-      } else {
-        toast({
-          title: "Signup Failed",
-          description: "This username is already taken. Please choose another one.",
-          variant: "destructive",
-        })
+
+        if (onSignupSuccess) {
+          onSignupSuccess(email)
+        } else {
+          onSwitchToLogin()
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Signup error:", error)
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred while creating your account",
-        variant: "destructive",
-      })
+      setError(error?.message || "An error occurred during signup")
     } finally {
       setIsLoading(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(newOpen) => {
+        if (!newOpen) {
+          resetForm()
+        }
+        onOpenChange(newOpen)
+      }}
+    >
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Create Account</DialogTitle>
@@ -128,14 +106,38 @@ export function SignupModal({ open, onOpenChange, onSwitchToLogin }: SignupModal
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="username">Username</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
-                id="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Choose a username"
-                autoComplete="username"
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter your email"
+                autoComplete="email"
+                required
               />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="firstName">First Name</Label>
+                <Input
+                  id="firstName"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="First name"
+                  autoComplete="given-name"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="lastName">Last Name</Label>
+                <Input
+                  id="lastName"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  placeholder="Last name"
+                  autoComplete="family-name"
+                />
+              </div>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="password">Password</Label>
@@ -146,6 +148,8 @@ export function SignupModal({ open, onOpenChange, onSwitchToLogin }: SignupModal
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Choose a password"
                 autoComplete="new-password"
+                required
+                minLength={6}
               />
             </div>
             <div className="grid gap-2">
@@ -157,14 +161,27 @@ export function SignupModal({ open, onOpenChange, onSwitchToLogin }: SignupModal
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm your password"
                 autoComplete="new-password"
+                required
               />
             </div>
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
           </div>
           <DialogFooter className="flex flex-col sm:flex-col gap-2">
             <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Creating account..." : "Create Account"}
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating account...
+                </>
+              ) : (
+                "Create Account"
+              )}
             </Button>
-            <Button type="button" variant="ghost" onClick={onSwitchToLogin} className="w-full">
+            <Button type="button" variant="outline" onClick={onSwitchToLogin} className="w-full">
               Already have an account? Login
             </Button>
           </DialogFooter>

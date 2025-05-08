@@ -12,7 +12,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { AISettingsDialog } from "./ai-settings-dialog"
 import { DataEditApprovalDialog } from "./data-edit-approval-dialog"
-import { Bot, X, Minimize, Maximize, Settings, Send, Trash, Loader2 } from "lucide-react"
+import { Bot, X, Minimize, Maximize, Settings, Send, Trash, Loader2, HelpCircle, Info } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { cn } from "@/lib/utils"
 import ReactMarkdown from "react-markdown"
@@ -25,6 +25,7 @@ export function AIChatWindow() {
     isSending,
     pendingDataEdit,
     isPendingApproval,
+    settings,
     sendMessage,
     clearMessages,
     minimizeChat,
@@ -36,6 +37,7 @@ export function AIChatWindow() {
 
   const [input, setInput] = useState("")
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isHelpOpen, setIsHelpOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [typingIndicator, setTypingIndicator] = useState(false)
@@ -82,6 +84,20 @@ export function AIChatWindow() {
     }
   }
 
+  // Quick message suggestions
+  const suggestions = [
+    "What tasks do I have due this week?",
+    "Create a new project for website redesign",
+    "Show me my upcoming meetings",
+    "Add a new task to finish the report by Friday",
+  ]
+
+  const sendSuggestion = (suggestion: string) => {
+    if (!isSending) {
+      sendMessage(suggestion)
+    }
+  }
+
   if (!isOpen) return null
 
   return (
@@ -104,6 +120,18 @@ export function AIChatWindow() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setIsHelpOpen(!isHelpOpen)}>
+                    <HelpCircle className="h-4 w-4" />
+                    <span className="sr-only">Help</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Help</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -151,6 +179,40 @@ export function AIChatWindow() {
           <>
             <CardContent className="flex-1 p-0">
               <ScrollArea className="h-[480px] px-4 py-4">
+                {isHelpOpen && (
+                  <div className="mb-6 bg-muted/50 p-4 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <Info className="h-5 w-5 text-primary mt-0.5" />
+                      <div>
+                        <h3 className="font-medium">AI Assistant Help</h3>
+                        <p className="text-sm mt-1">
+                          This AI assistant can help you manage your data and use the application more effectively.
+                        </p>
+                        <div className="mt-2 space-y-1 text-sm">
+                          <p>
+                            <span className="font-medium">Data Access:</span>{" "}
+                            {settings.canAccessData ? "Enabled" : "Disabled"}
+                          </p>
+                          <p>
+                            <span className="font-medium">Data Editing:</span>{" "}
+                            {settings.canEditData ? "Enabled" : "Disabled"}
+                          </p>
+                        </div>
+                        <p className="text-sm mt-2">You can ask the assistant to help with tasks like:</p>
+                        <ul className="list-disc list-inside text-sm mt-1 space-y-1">
+                          <li>Creating and managing tasks, notes, and other data</li>
+                          <li>Finding information in your saved data</li>
+                          <li>Getting help with using application features</li>
+                          <li>Creating complex data entries across multiple features</li>
+                        </ul>
+                        <p className="text-sm mt-2">
+                          Press Alt+A to quickly open or close the assistant from anywhere in the app.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {messages.length === 0 ? (
                   <div className="flex h-full flex-col items-center justify-center text-center p-4">
                     <Bot className="h-16 w-16 text-primary/40 mb-4" />
@@ -158,6 +220,19 @@ export function AIChatWindow() {
                     <p className="text-sm text-muted-foreground mt-2 max-w-[280px]">
                       Ask me anything about your data or how to use this application.
                     </p>
+
+                    <div className="mt-6 grid grid-cols-1 gap-2 w-full max-w-[320px]">
+                      {suggestions.map((suggestion) => (
+                        <Button
+                          key={suggestion}
+                          variant="outline"
+                          className="justify-start text-left h-auto py-2 px-3"
+                          onClick={() => sendSuggestion(suggestion)}
+                        >
+                          {suggestion}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-6">
@@ -178,7 +253,9 @@ export function AIChatWindow() {
                             "flex max-w-[75%] flex-col gap-2 rounded-2xl px-4 py-3 text-sm",
                             message.role === "user"
                               ? "bg-primary text-primary-foreground rounded-tr-none"
-                              : "bg-muted rounded-tl-none",
+                              : message.role === "system"
+                                ? "bg-muted/80 border border-border/50 rounded-tl-none"
+                                : "bg-muted rounded-tl-none",
                           )}
                         >
                           <div className="whitespace-pre-wrap">
@@ -189,7 +266,11 @@ export function AIChatWindow() {
                           <div
                             className={cn(
                               "text-xs",
-                              message.role === "user" ? "text-primary-foreground/80" : "text-muted-foreground",
+                              message.role === "user"
+                                ? "text-primary-foreground/80"
+                                : message.role === "system"
+                                  ? "text-muted-foreground/80"
+                                  : "text-muted-foreground",
                             )}
                           >
                             {formatDistanceToNow(message.timestamp, { addSuffix: true })}

@@ -72,15 +72,27 @@ export default function CountdownPage() {
 
   // Load timers from localStorage
   useEffect(() => {
-    const savedTimers = getLocalStorage<CountdownTimer[]>("countdownTimers", [])
-    setTimers(savedTimers)
+    try {
+      const savedTimers = getLocalStorage<CountdownTimer[]>("countdownTimers", [])
+      // Ensure timers is always an array
+      setTimers(Array.isArray(savedTimers) ? savedTimers : [])
 
-    // Initialize audio element
-    audioRef.current = new Audio("/alarm.mp3")
+      // Initialize audio element
+      audioRef.current = new Audio("/alarm.mp3")
+    } catch (error) {
+      console.error("Error loading countdown timers:", error)
+      // Fallback to empty array if there's an error
+      setTimers([])
+    }
   }, [])
 
   // Add a function to handle recurring timers
   const checkAndUpdateRecurringTimers = () => {
+    if (!Array.isArray(timers)) {
+      console.error("Cannot check recurring timers: timers is not an array")
+      return
+    }
+
     const now = new Date()
     let hasUpdates = false
 
@@ -134,43 +146,48 @@ export default function CountdownPage() {
       const updatedTimers = { ...remainingTimes }
       let shouldSave = false
 
-      timers.forEach((timer) => {
-        if (timer.completed) {
-          updatedTimers[timer.id] = null
-          return
-        }
-
-        const endDate = new Date(timer.endDate)
-        const timeDiff = endDate.getTime() - now.getTime()
-
-        if (timeDiff <= 0) {
-          // Timer has ended
-          if (!timer.completed) {
-            if (timer.playSound && timer.id === activeTimer) {
-              playAlarmSound()
-            }
-
-            // Mark timer as completed
-            setTimers((prev) => prev.map((t) => (t.id === timer.id ? { ...t, completed: true } : t)))
-            shouldSave = true
-
-            toast({
-              title: "Event timer completed",
-              description: `${timer.title} has ended!`,
-            })
+      // Ensure timers is an array before iterating
+      if (Array.isArray(timers)) {
+        timers.forEach((timer) => {
+          if (timer.completed) {
+            updatedTimers[timer.id] = null
+            return
           }
 
-          updatedTimers[timer.id] = null
-        } else {
-          // Calculate remaining time
-          const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24))
-          const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
-          const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60))
-          const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000)
+          const endDate = new Date(timer.endDate)
+          const timeDiff = endDate.getTime() - now.getTime()
 
-          updatedTimers[timer.id] = { days, hours, minutes, seconds }
-        }
-      })
+          if (timeDiff <= 0) {
+            // Timer has ended
+            if (!timer.completed) {
+              if (timer.playSound && timer.id === activeTimer) {
+                playAlarmSound()
+              }
+
+              // Mark timer as completed
+              setTimers((prev) =>
+                Array.isArray(prev) ? prev.map((t) => (t.id === timer.id ? { ...t, completed: true } : t)) : [],
+              )
+              shouldSave = true
+
+              toast({
+                title: "Event timer completed",
+                description: `${timer.title} has ended!`,
+              })
+            }
+
+            updatedTimers[timer.id] = null
+          } else {
+            // Calculate remaining time
+            const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24))
+            const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+            const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60))
+            const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000)
+
+            updatedTimers[timer.id] = { days, hours, minutes, seconds }
+          }
+        })
+      }
 
       setRemainingTimes(updatedTimers)
 
@@ -185,6 +202,12 @@ export default function CountdownPage() {
   }, [timers, activeTimer])
 
   const saveTimers = (updatedTimers: CountdownTimer[]) => {
+    // Ensure we're saving a valid array
+    if (!Array.isArray(updatedTimers)) {
+      console.error("Attempted to save invalid timers data:", updatedTimers)
+      return
+    }
+
     setTimers(updatedTimers)
     setLocalStorage("countdownTimers", updatedTimers)
   }
@@ -374,12 +397,14 @@ export default function CountdownPage() {
   }
 
   // Sort timers: first by completed status, then by end date
-  const sortedTimers = [...timers].sort((a, b) => {
-    if (a.completed !== b.completed) {
-      return a.completed ? 1 : -1
-    }
-    return new Date(a.endDate).getTime() - new Date(b.endDate).getTime()
-  })
+  const sortedTimers = Array.isArray(timers)
+    ? [...timers].sort((a, b) => {
+        if (a.completed !== b.completed) {
+          return a.completed ? 1 : -1
+        }
+        return new Date(a.endDate).getTime() - new Date(b.endDate).getTime()
+      })
+    : []
 
   // Update the page title and description
   return (

@@ -7,6 +7,7 @@ import { GlobalSaveButton } from "@/components/global-save-button"
 import { Suspense } from "react"
 import { Button } from "@/components/ui/button"
 import { Coffee } from "lucide-react"
+import { AuthButton } from "@/components/auth/auth-button"
 
 interface SiteHeaderProps {
   onSettingsUpdate: (settings: any) => void
@@ -35,6 +36,7 @@ export function SiteHeader({ onSettingsUpdate }: SiteHeaderProps) {
           <h1 className="text-xl font-bold md:text-2xl">Utility Hub</h1>
         </div>
         <div className="flex items-center gap-2">
+          <AuthButton />
           <KofiButton />
           <Suspense fallback={<div className="w-[120px]"></div>}>
             <RoleSelector />

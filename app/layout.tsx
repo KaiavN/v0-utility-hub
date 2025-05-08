@@ -1,6 +1,13 @@
 import type React from "react"
 import type { Metadata } from "next/dist/lib/metadata/types/metadata-interface"
 import ClientLayout from "./client"
+import { DataIntegrityMonitor } from "@/components/data-integrity-monitor"
+import { recoverPlannerData } from "@/lib/planner-data-recovery"
+import { AuthProvider } from "@/contexts/auth-context"
+import { ThemeProvider } from "@/components/theme-provider"
+import { cn } from "@/lib/utils"
+import { fontSans } from "@/lib/fonts"
+import { Toaster } from "@/components/ui/toaster"
 
 export const metadata: Metadata = {
   title: "Utility Hub",
@@ -32,7 +39,33 @@ interface Props {
 }
 
 export default function RootLayout({ children }: Props) {
-  return <ClientLayout>{children}</ClientLayout>
+  // This ensures planner data is initialized as early as possible
+  if (typeof window !== "undefined") {
+    // Initialize planner data on client side
+    setTimeout(() => {
+      try {
+        recoverPlannerData()
+      } catch (error) {
+        console.error("Error initializing planner data:", error)
+      }
+    }, 0)
+  }
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body className={cn("min-h-screen bg-background font-sans antialiased", fontSans.variable)}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <AuthProvider>
+            <ClientLayout>
+              {children}
+              {/* Add DataIntegrityMonitor for automatic data maintenance */}
+              <DataIntegrityMonitor />
+            </ClientLayout>
+            <Toaster />
+          </AuthProvider>
+        </ThemeProvider>
+      </body>
+    </html>
+  )
 }
 
 

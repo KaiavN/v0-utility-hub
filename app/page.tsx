@@ -8,9 +8,12 @@ import { useUserPreferences } from "@/contexts/user-preferences-context"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { GraduationCap, Briefcase } from "lucide-react"
+import { GitHubLoginButton } from "@/components/auth/github-login-button"
+import { useAuth } from "@/contexts/auth-context"
 
 export default function HomePage() {
   const { preferences, setRole, isStudent, isProfessional } = useUserPreferences()
+  const { user, isAuthenticated } = useAuth()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -144,6 +147,20 @@ export default function HomePage() {
           </div>
         </CardContent>
       </Card>
+
+      {!isAuthenticated && (
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Sign In to Sync Your Data</CardTitle>
+            <CardDescription>
+              Create an account to sync your data across devices and access premium features.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <GitHubLoginButton className="w-full md:w-auto" />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="mb-8">
         <DataTransfer />

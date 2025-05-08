@@ -2,188 +2,271 @@
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { toast } from "@/components/ui/use-toast"
+import { createClient } from "@supabase/supabase-js"
+import { useRouter } from "next/navigation"
 
+// Simplified User type
 type User = {
-  username: string
   id: string
-}
-
-type StoredUser = {
-  username: string
-  passwordHash: string
-  id: string
-  createdAt: string
+  email: string
+  name?: string
+  avatarUrl?: string
 }
 
 interface AuthContextType {
   user: User | null
   isAuthenticated: boolean
-  login: (username: string, password: string) => Promise<boolean>
-  signup: (username: string, password: string) => Promise<boolean>
-  logout: () => void
+  isLoading: boolean
+  login: (email: string, password: string) => Promise<boolean>
+  loginWithGitHub: () => Promise<void>
+  logout: () => Promise<void>
+  resetPassword: (email: string) => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Simple hash function for passwords
-// In a production app, you would use bcrypt or similar
-function hashPassword(password: string): string {
-  let hash = 0
-  for (let i = 0; i < password.length; i++) {
-    const char = password.charCodeAt(i)
-    hash = (hash << 5) - hash + char
-    hash = hash & hash // Convert to 32bit integer
-  }
-  // Add salt based on password length and first character
-  const salt = password.length * password.charCodeAt(0)
-  return Math.abs(hash * salt).toString(16)
+// Create a direct Supabase client
+const createDirectSupabaseClient = () => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  return createClient(supabaseUrl, supabaseAnonKey)
 }
-
-// Constants for storage
-const USER_STORAGE_KEY = "utility-hub-user"
-const USERS_STORAGE_KEY = "utility-hub-users"
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const router = useRouter()
 
-  // Load user data from localStorage on initial mount
+  // Create a fresh client for each render
+  const supabase = createDirectSupabaseClient()
+
+  // Load user data on initial mount
   useEffect(() => {
-    const storedUser = localStorage.getItem(USER_STORAGE_KEY)
-    if (storedUser) {
+    const loadUser = async () => {
+      setIsLoading(true)
+
       try {
-        const userData = JSON.parse(storedUser) as User
+        // Check if we have a session
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+
+        if (session) {
+          // User is logged in
+          const userData: User = {
+            id: session.user.id,
+            email: session.user.email || "",
+            name: session.user.user_metadata?.name || session.user.user_metadata?.full_name || "",
+            avatarUrl: session.user.user_metadata?.avatar_url || "",
+          }
+
+          setUser(userData)
+          setIsAuthenticated(true)
+        } else {
+          // No active session
+          setUser(null)
+          setIsAuthenticated(false)
+        }
+      } catch (error) {
+        console.error("Error loading user:", error)
+        setUser(null)
+        setIsAuthenticated(false)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadUser()
+
+    // Set up auth state change listener
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session) {
+        // User signed in
+        const userData: User = {
+          id: session.user.id,
+          email: session.user.email || "",
+          name: session.user.user_metadata?.name || session.user.user_metadata?.full_name || "",
+          avatarUrl: session.user.user_metadata?.avatar_url || "",
+        }
+
         setUser(userData)
         setIsAuthenticated(true)
-      } catch (error) {
-        console.error("Failed to parse stored user data:", error)
-        localStorage.removeItem(USER_STORAGE_KEY)
-        toast({
-          title: "Session Error",
-          description: "Your session was invalid and has been reset",
-          variant: "destructive",
-        })
+      } else if (event === "SIGNED_OUT" || event === "USER_DELETED") {
+        // User signed out
+        setUser(null)
+        setIsAuthenticated(false)
       }
+    })
+
+    return () => {
+      subscription.unsubscribe()
     }
   }, [])
 
-  // User storage functions
-  const getUsersFromStorage = (): Record<string, StoredUser> => {
-    const users = localStorage.getItem(USERS_STORAGE_KEY)
-    return users ? JSON.parse(users) : {}
-  }
+  // GitHub authentication function
+  const loginWithGitHub = async (): Promise<void> => {
+    try {
+      setIsLoading(true)
 
-  const saveUsersToStorage = (users: Record<string, StoredUser>) => {
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
-  }
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "github",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      })
 
-  const validateUsername = (username: string): boolean => {
-    return username.length >= 3 && username.length <= 20 && /^[a-zA-Z0-9_]+$/.test(username)
-  }
-
-  const validatePassword = (password: string): boolean => {
-    return password.length >= 6
-  }
-
-  const login = async (username: string, password: string): Promise<boolean> => {
-    // Validate inputs
-    if (!validateUsername(username)) {
+      if (error) {
+        console.error("GitHub login error:", error)
+        toast({
+          title: "Login Failed",
+          description: error.message || "Failed to login with GitHub",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("GitHub login unexpected error:", error)
       toast({
-        title: "Invalid Username",
-        description: "Username must be 3-20 characters and contain only letters, numbers, and underscores",
+        title: "Login Failed",
+        description: "An unexpected error occurred",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Simplified login function (kept for backward compatibility)
+  const login = async (email: string, password: string): Promise<boolean> => {
+    if (!email || !password) {
+      toast({
+        title: "Login Failed",
+        description: "Email and password are required",
         variant: "destructive",
       })
       return false
     }
 
-    if (!validatePassword(password)) {
-      toast({
-        title: "Invalid Password",
-        description: "Password must be at least 6 characters",
-        variant: "destructive",
+    try {
+      setIsLoading(true)
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       })
-      return false
-    }
 
-    const users = getUsersFromStorage()
-    const storedUser = users[username.toLowerCase()]
-
-    if (storedUser && storedUser.passwordHash === hashPassword(password)) {
-      const userData: User = {
-        username: storedUser.username,
-        id: storedUser.id,
+      if (error) {
+        toast({
+          title: "Login Failed",
+          description: error.message || "Invalid email or password",
+          variant: "destructive",
+        })
+        return false
       }
 
-      setUser(userData)
-      setIsAuthenticated(true)
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userData))
+      toast({
+        title: "Login Successful",
+        description: "Welcome back!",
+      })
+
       return true
+    } catch (error) {
+      console.error("Login error:", error)
+      toast({
+        title: "Login Failed",
+        description: "An unexpected error occurred",
+        variant: "destructive",
+      })
+      return false
+    } finally {
+      setIsLoading(false)
     }
-
-    return false
   }
 
-  const signup = async (username: string, password: string): Promise<boolean> => {
-    // Validate inputs
-    if (!validateUsername(username)) {
+  // Simplified logout function
+  const logout = async () => {
+    try {
+      setIsLoading(true)
+      await supabase.auth.signOut()
+      setUser(null)
+      setIsAuthenticated(false)
       toast({
-        title: "Invalid Username",
-        description: "Username must be 3-20 characters and contain only letters, numbers, and underscores",
+        title: "Logged Out",
+        description: "You have been successfully logged out",
+      })
+      router.push("/")
+    } catch (error) {
+      console.error("Logout error:", error)
+      toast({
+        title: "Logout Failed",
+        description: "An unexpected error occurred",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Simplified reset password function
+  const resetPassword = async (email: string): Promise<boolean> => {
+    if (!email) {
+      toast({
+        title: "Password Reset Failed",
+        description: "Email is required",
         variant: "destructive",
       })
       return false
     }
 
-    if (!validatePassword(password)) {
+    try {
+      setIsLoading(true)
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      })
+
+      if (error) {
+        toast({
+          title: "Password Reset Failed",
+          description: error.message || "Failed to send reset email",
+          variant: "destructive",
+        })
+        return false
+      }
+
       toast({
-        title: "Invalid Password",
-        description: "Password must be at least 6 characters",
+        title: "Password Reset Email Sent",
+        description: "Check your email for a link to reset your password",
+      })
+      return true
+    } catch (error) {
+      console.error("Reset password error:", error)
+      toast({
+        title: "Password Reset Failed",
+        description: "An unexpected error occurred",
         variant: "destructive",
       })
       return false
+    } finally {
+      setIsLoading(false)
     }
-
-    const users = getUsersFromStorage()
-    const lowerUsername = username.toLowerCase()
-
-    if (users[lowerUsername]) {
-      return false // Username already exists
-    }
-
-    // Generate unique ID
-    const userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-
-    // Save new user with hashed password
-    users[lowerUsername] = {
-      username: username, // Preserve original case for display
-      passwordHash: hashPassword(password),
-      id: userId,
-      createdAt: new Date().toISOString(),
-    }
-
-    saveUsersToStorage(users)
-
-    // Auto login
-    const userData: User = {
-      username: username,
-      id: userId,
-    }
-
-    setUser(userData)
-    setIsAuthenticated(true)
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userData))
-
-    return true
-  }
-
-  const logout = () => {
-    setUser(null)
-    setIsAuthenticated(false)
-    localStorage.removeItem(USER_STORAGE_KEY)
   }
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, login, signup, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider
+      value={{
+        user,
+        isAuthenticated,
+        isLoading,
+        login,
+        loginWithGitHub,
+        logout,
+        resetPassword,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
   )
 }
 

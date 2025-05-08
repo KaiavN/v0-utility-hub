@@ -24,6 +24,7 @@ import {
   Quote,
   Music,
   GanttChartSquare,
+  MessageSquare,
 } from "lucide-react"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
@@ -59,6 +60,12 @@ export const AppSidebar = React.memo(function AppSidebar() {
         title: "Spotify Music",
         icon: Music,
         href: "/spotify",
+        badge: "New",
+      },
+      {
+        title: "Messages",
+        icon: MessageSquare,
+        href: "/messages",
         badge: "New",
       },
       {

@@ -4,10 +4,11 @@ import type React from "react"
 import { createContext, useContext, useState, useEffect, useCallback } from "react"
 import { useLocalStorage } from "@/lib/local-storage"
 import { aiService } from "@/lib/ai-service"
-import type { DataEditOperation } from "@/lib/ai-data-editor"
+import type { DataEditOperation } from "./ai-data-editor"
 import { processDataEditOperation, processMultipleDataEditOperations } from "@/lib/ai-data-editor"
 import { eventBus } from "@/lib/event-bus"
 import { getOpenRouterApiKey } from "@/app/actions/ai-actions"
+import { loadAllData } from "@/lib/data-manager"
 
 export type Message = {
   id: string
@@ -60,6 +61,7 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
   const [isSending, setIsSending] = useState(false)
   const [pendingDataEdit, setPendingDataEdit] = useState<DataEditOperation | DataEditOperation[] | null>(null)
   const [isPendingApproval, setIsPendingApproval] = useState(false)
+  const [dataContext, setDataContext] = useState<Record<string, any>>({})
 
   // Initialize with API key from server
   useEffect(() => {
@@ -80,11 +82,35 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
     fetchApiKey()
   }, [])
 
+  // Load data context when settings change
+  useEffect(() => {
+    if (settings.canAccessData) {
+      try {
+        const allData = loadAllData()
+        setDataContext(allData)
+      } catch (error) {
+        console.error("Error loading data context:", error)
+      }
+    } else {
+      setDataContext({})
+    }
+  }, [settings.canAccessData])
+
   // Subscribe to data changes to update the AI context
   useEffect(() => {
     const handleDataChange = (event: any) => {
       // If there are pending data edits, we don't want to add a message about data changes
       if (isPendingApproval) return
+
+      // Update the data context
+      if (settings.canAccessData) {
+        try {
+          const allData = loadAllData()
+          setDataContext(allData)
+        } catch (error) {
+          console.error("Error updating data context:", error)
+        }
+      }
 
       // Add a system message about data changes if the chat is open
       if (isOpen && messages.length > 0) {
@@ -106,7 +132,7 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
       // Unsubscribe from the event
       unsubscribe()
     }
-  }, [isOpen, messages.length, isPendingApproval, setMessages])
+  }, [isOpen, messages.length, isPendingApproval, settings.canAccessData, setMessages])
 
   const updateSettings = useCallback(
     (newSettings: Partial<AISettings>) => {
@@ -141,7 +167,7 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
         // Format messages for the API
         const apiMessages = messages
           .filter((msg) => msg.role !== "system")
-          .slice(-10) // Limit context to last 10 messages
+          .slice(-15) // Limit context to last 15 messages
           .map((msg) => ({
             role: msg.role as "user" | "assistant",
             content: msg.content,

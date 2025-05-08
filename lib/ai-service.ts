@@ -121,8 +121,9 @@ function optimizeMessageHistory(messages: OpenRouterMessage[]): OpenRouterMessag
   // For user and assistant messages, keep only the most recent ones
   const conversationMessages = messages.filter((msg) => msg.role !== "system")
 
-  // If we have more than 10 conversation messages, keep only the most recent 10
-  const recentMessages = conversationMessages.length > 10 ? conversationMessages.slice(-10) : conversationMessages
+  // If we have more than 15 conversation messages, keep only the most recent ones
+  // This is increased from 10 to 15 to provide more context
+  const recentMessages = conversationMessages.length > 15 ? conversationMessages.slice(-15) : conversationMessages
 
   // Combine system messages with recent conversation messages
   return [...systemMessages, ...recentMessages]
@@ -150,13 +151,13 @@ function generateSystemPrompt(canAccessData: boolean, canEditData: boolean): str
   const userPreferences = userPreferencesString ? JSON.parse(userPreferencesString) : { role: "student" }
   const role = userPreferences.role || "student"
 
-  let prompt = `You're an AI assistant for "Utility Hub" - a web app that stores data in localStorage.
+  let prompt = `You're an AI assistant for "Utility Hub" - a comprehensive web app that stores data in localStorage.
 
 Current date/time: ${formattedDate} at ${formattedTime}.
 
 ## YOUR ROLE
 
-You are a PROACTIVE assistant. Don't just answer questions - anticipate needs and take initiative:
+You are a PROACTIVE and KNOWLEDGEABLE assistant. Don't just answer questions - anticipate needs and take initiative:
 
 1. When users mention tasks, events, or information they need to track, AUTOMATICALLY offer to create appropriate entries
 2. Always provide COMPLETE data entries with detailed descriptions, not just basic fields
@@ -164,6 +165,18 @@ You are a PROACTIVE assistant. Don't just answer questions - anticipate needs an
 4. For notes and knowledge items, generate comprehensive content based on context
 5. Suggest related items across features (e.g., create both a task and calendar event for deadlines)
 6. Offer to create multiple related entries when appropriate (e.g., project + related tasks)
+7. Understand relationships between different data types (e.g., projects contain tasks, meetings appear in calendar)
+8. Provide specific examples when explaining features
+
+## APPLICATION STRUCTURE
+
+Utility Hub is organized into these main components:
+
+1. App Sidebar: Navigation menu for all features
+2. Feature Pages: Individual pages for each feature (tasks, notes, etc.)
+3. Data Storage: All data is stored in localStorage with specific keys
+4. Settings: Global and feature-specific settings
+5. Data Import/Export: Tools for backing up and transferring data
 
 ## FEATURES`
 
@@ -175,63 +188,86 @@ You are a PROACTIVE assistant. Don't just answer questions - anticipate needs an
 - Create to-dos with due dates, priorities, tags
 - Mark complete, filter, sort
 - Uses: Daily to-dos, work tasks, shopping lists
+- Data structure: Array of task objects with title, description, dueDate, completed, priority, tags, category
 
 ### Notes
 - Create formatted notes with titles
 - Organize with tags, categories, colors
 - Uses: Meeting notes, ideas, journal entries
+- Data structure: Array of note objects with title, content, tags, category, color, createdAt
 
 ### Bookmarks
 - Save URLs with titles, descriptions, tags
 - Uses: Research resources, reading lists
+- Data structure: Array of bookmark objects with title, url, description, tags, category, favicon
 
 ### Password Manager
 - Store credentials securely
 - Uses: Website logins, account info
+- Data structure: Array of password objects with title, username, password, website, notes, category, lastUpdated
 
 ### Knowledge Base
 - Store structured information
 - Uses: Study notes, research, documentation
+- Data structure: Array of knowledge objects with title, content, tags, category, source, createdAt
 
 ### Code Snippets
 - Save code with syntax highlighting
 - Uses: Programming reference, reusable functions
+- Data structure: Array of snippet objects with title, code, language, description, tags, createdAt
 
 ### Meal Planning
 - Store recipes and plan meals
 - Uses: Weekly meal planning, recipe collection
+- Data structure: Array of recipe objects with title, ingredients, instructions, prepTime, cookTime, servings, category, tags
 
 ### Workout Tracker
 - Log exercises, duration, calories
 - Uses: Fitness tracking, exercise routines
+- Data structure: Array of workout objects with date, exercises, duration, calories, notes
 
 ### Countdown Timers
 - Track important dates
 - Uses: Event planning, deadlines
+- Data structure: Array of timer objects with title, targetDate, description, color
 
 ### Flashcards
 - Create study cards with front/back
 - Uses: Language learning, exam prep
+- Data structure: Array of flashcard objects with front, back, deckId
 
 ### Assignment Tracker
 - Track academic work with due dates
 - Uses: Homework management, research papers
+- Data structure: Array of assignment objects with title, dueDate, description, course, priority, completed, attachments
 
 ### Calendar
 - Schedule events with recurring options
 - Uses: Appointments, time blocking
+- Data structure: Array of planner objects with title, date, startTime, endTime, description, category, isRecurring, recurringPattern, color, completed
 
 ### Gantt Chart
 - Visual project planning with dependencies
 - Uses: Project management, timelines
+- Data structure: Complex object with projects, tasks, sections, and links arrays
 
 ### Citation Manager
 - Track academic references
 - Uses: Research papers, academic writing
+- Data structure: Array of citation objects with title, source, authors, date, url, journal, volume, issue, pages, publisher, doi, notes, tags
 
 ### Spotify Integration
 - Connect to Spotify, control playback
 - Uses: Background music while working
+- Data structure: Spotify tokens and preferences stored in localStorage
+
+## FEATURE RELATIONSHIPS
+
+1. Tasks → Calendar: High priority tasks can create countdown timers
+2. Assignments → Gantt Chart: Assignments can be visualized in the Gantt chart
+3. Meetings → Calendar: Meetings automatically create calendar events
+4. Projects → Gantt Chart: Projects are synchronized with the Gantt chart
+5. Tasks → Projects: Tasks can be associated with projects
 
 ## COMMON WORKFLOWS
 
@@ -247,75 +283,102 @@ You are a PROACTIVE assistant. Don't just answer questions - anticipate needs an
 - Create to-dos with due dates, priorities, tags
 - Mark complete, filter, sort
 - Uses: Daily to-dos, work tasks, shopping lists
+- Data structure: Array of task objects with title, description, dueDate, completed, priority, tags, category
 
 ### Notes
 - Create formatted notes with titles
 - Organize with tags, categories, colors
 - Uses: Meeting notes, ideas, journal entries
+- Data structure: Array of note objects with title, content, tags, category, color, createdAt
 
 ### Bookmarks
 - Save URLs with titles, descriptions, tags
 - Uses: Research resources, reading lists
+- Data structure: Array of bookmark objects with title, url, description, tags, category, favicon
 
 ### Password Manager
 - Store credentials securely
 - Uses: Website logins, account info
+- Data structure: Array of password objects with title, username, password, website, notes, category, lastUpdated
 
 ### Knowledge Base
 - Store structured information
 - Uses: Study notes, research, documentation
+- Data structure: Array of knowledge objects with title, content, tags, category, source, createdAt
 
 ### Code Snippets
 - Save code with syntax highlighting
 - Uses: Programming reference, reusable functions
+- Data structure: Array of snippet objects with title, code, language, description, tags, createdAt
 
 ### Meal Planning
 - Store recipes and plan meals
 - Uses: Weekly meal planning, recipe collection
+- Data structure: Array of recipe objects with title, ingredients, instructions, prepTime, cookTime, servings, category, tags
 
 ### Workout Tracker
 - Log exercises, duration, calories
 - Uses: Fitness tracking, exercise routines
+- Data structure: Array of workout objects with date, exercises, duration, calories, notes
 
 ### Contacts Manager
 - Store contact details
 - Uses: Address book, client directory
+- Data structure: Array of contact objects with firstName, lastName, email, phone, address, company, notes, tags, category
 
 ### Finance Dashboard
 - Track income/expenses, accounts, goals
 - Uses: Budgeting, expense tracking
+- Data structure: Complex object with transactions, accounts, goals, and categories
 
 ### Markdown Editor
 - Create formatted documents
 - Uses: Documentation, blog posts, notes
+- Data structure: Array of document objects with title, content, tags, createdAt, lastUpdated, category
 
 ### Countdown Timers
 - Track important dates
 - Uses: Event planning, deadlines
+- Data structure: Array of timer objects with title, targetDate, description, color
 
 ### Project Tracker
 - Manage complex projects with team members
 - Uses: Work projects, renovations, events
+- Data structure: Array of project objects with title, description, startDate, endDate, status, members, tasks, category
 
 ### Meeting Notes
 - Schedule meetings, prepare agendas
 - Uses: Work meetings, interviews
+- Data structure: Array of meeting objects with title, date, startTime, endTime, location, participants, agenda, notes
 
 ### Client Manager
 - Track client information
 - Uses: Freelance work, consulting
+- Data structure: Array of client objects with name, email, phone, company, address, notes, projects
 
 ### Time Billing
 - Track billable time and invoices
 - Uses: Freelancers, consultants
+- Data structure: Array of billing objects with client, amount, date, description, status, dueDate, invoiceNumber, paymentMethod
 
 ### Calendar
 - Schedule events with recurring options
 - Uses: Appointments, time blocking
+- Data structure: Array of planner objects with title, date, startTime, endTime, description, category, isRecurring, recurringPattern, color, completed
 
 ### Gantt Chart
 - Visual project planning with dependencies
 - Uses: Project management, timelines
+- Data structure: Complex object with projects, tasks, sections, and links arrays
+
+## FEATURE RELATIONSHIPS
+
+1. Projects → Tasks: Projects contain multiple tasks
+2. Clients → Projects: Clients are associated with projects
+3. Meetings → Calendar: Meetings automatically create calendar events
+4. Projects → Gantt Chart: Projects are synchronized with the Gantt chart
+5. Clients → Billing: Billing entries are associated with clients
+6. Tasks → Projects: Tasks can be associated with projects
 
 ## COMMON WORKFLOWS
 
@@ -326,7 +389,7 @@ You are a PROACTIVE assistant. Don't just answer questions - anticipate needs an
   }
 
   if (canAccessData) {
-    prompt += `\n\nYou have access to user data for personalized assistance. I will provide you with detailed information about the user's data in separate messages.`
+    prompt += `\n\nYou have access to user data for personalized assistance. I will provide you with detailed information about the user's data in separate messages. Use this data to provide context-aware responses and suggestions.`
   }
 
   if (canEditData) {
@@ -341,6 +404,10 @@ RULES:
 6. No trailing commas
 7. Properly close brackets
 8. Complete, valid JSON only
+9. For dates, use YYYY-MM-DD format
+10. For ISO dates, use proper ISO format (YYYY-MM-DDThh:mm:ss.sssZ)
+11. For arrays, use proper JSON array format with square brackets
+12. For nested objects, use proper JSON object format with curly braces
 
 Example:
 DATA_EDIT_OPERATION: 
@@ -700,8 +767,59 @@ async function prepareDataContexts(): Promise<string[]> {
       if (projectsContext) contexts.push(projectsContext)
     }
 
-    // Process other data types as needed
-    // Add more specialized processors for other data types
+    // Process contacts
+    if (allData.contacts && allData.contacts.length > 0) {
+      const contactsContext = processContactsData(allData.contacts)
+      if (contactsContext) contexts.push(contactsContext)
+    }
+
+    // Process finance data
+    if (allData.financeData) {
+      const financeContext = processFinanceData(allData.financeData)
+      if (financeContext) contexts.push(financeContext)
+    }
+
+    // Process meetings
+    if (allData.meetings && allData.meetings.length > 0) {
+      const meetingsContext = processMeetingsData(allData.meetings)
+      if (meetingsContext) contexts.push(meetingsContext)
+    }
+
+    // Process clients
+    if (allData.clients && allData.clients.length > 0) {
+      const clientsContext = processClientsData(allData.clients)
+      if (clientsContext) contexts.push(clientsContext)
+    }
+
+    // Process assignments
+    if (allData.assignments && allData.assignments.length > 0) {
+      const assignmentsContext = processAssignmentsData(allData.assignments)
+      if (assignmentsContext) contexts.push(assignmentsContext)
+    }
+
+    // Process flashcards
+    if (allData.flashcards && allData.flashcards.length > 0) {
+      const flashcardsContext = processFlashcardsData(allData.flashcards)
+      if (flashcardsContext) contexts.push(flashcardsContext)
+    }
+
+    // Process code snippets
+    if (allData.codeSnippets && allData.codeSnippets.length > 0) {
+      const snippetsContext = processCodeSnippetsData(allData.codeSnippets)
+      if (snippetsContext) contexts.push(snippetsContext)
+    }
+
+    // Process markdown documents
+    if (allData.markdownDocuments && allData.markdownDocuments.length > 0) {
+      const markdownContext = processMarkdownData(allData.markdownDocuments)
+      if (markdownContext) contexts.push(markdownContext)
+    }
+
+    // Process countdown timers
+    if (allData.countdownTimers && allData.countdownTimers.length > 0) {
+      const timersContext = processCountdownTimersData(allData.countdownTimers)
+      if (timersContext) contexts.push(timersContext)
+    }
 
     // Process remaining data types in a more general way
     const remainingDataContext = processRemainingData(allData)
@@ -1072,10 +1190,456 @@ function processProjectsData(projects: any[] = [], ganttData: any = {}): string 
   }
 }
 
+// Process contacts data
+function processContactsData(contacts: any[]): string {
+  try {
+    // Group contacts by category
+    const categories: Record<string, number> = {}
+    contacts.forEach((contact) => {
+      const category = contact.category || "Uncategorized"
+      categories[category] = (categories[category] || 0) + 1
+    })
+
+    // Get unique tags
+    const allTags = new Set<string>()
+    contacts.forEach((contact) => {
+      if (contact.tags && Array.isArray(contact.tags)) {
+        contact.tags.forEach((tag: string) => allTags.add(tag))
+      }
+    })
+
+    // Get recent contacts
+    const recentContacts = contacts
+      .slice(-5) // Get 5 most recent contacts
+      .map((contact) => ({
+        id: contact.id,
+        name: contact.firstName + (contact.lastName ? ` ${contact.lastName}` : ""),
+        email: contact.email,
+        phone: contact.phone,
+        company: contact.company,
+        category: contact.category,
+        tags: contact.tags,
+      }))
+
+    return `User's contacts: ${JSON.stringify({
+      total: contacts.length,
+      categories,
+      tags: Array.from(allTags),
+      recentContacts,
+    })}`
+  } catch (error) {
+    console.error("Error processing contacts data:", error)
+    return ""
+  }
+}
+
+// Process finance data
+function processFinanceData(financeData: any): string {
+  try {
+    // If financeData is an array, process it as transactions
+    if (Array.isArray(financeData)) {
+      // Group by type
+      const income = financeData.filter((item) => item.type === "income")
+      const expenses = financeData.filter((item) => item.type === "expense")
+      const transfers = financeData.filter((item) => item.type === "transfer")
+
+      // Group by category
+      const categories: Record<string, { count: number; total: number }> = {}
+      financeData.forEach((item) => {
+        const category = item.category || "Uncategorized"
+        if (!categories[category]) {
+          categories[category] = { count: 0, total: 0 }
+        }
+        categories[category].count++
+        categories[category].total += item.amount || 0
+      })
+
+      // Get recent transactions
+      const recentTransactions = financeData
+        .slice(-5) // Get 5 most recent transactions
+        .map((item) => ({
+          id: item.id,
+          type: item.type,
+          amount: item.amount,
+          category: item.category,
+          description: item.description,
+          date: item.date,
+          account: item.account,
+        }))
+
+      return `User's finance data: ${JSON.stringify({
+        total: financeData.length,
+        income: income.length,
+        expenses: expenses.length,
+        transfers: transfers.length,
+        categories,
+        recentTransactions,
+      })}`
+    } else if (typeof financeData === "object" && financeData !== null) {
+      // Process as a complex finance object
+      const summary = {
+        accounts: financeData.accounts?.length || 0,
+        transactions: financeData.transactions?.length || 0,
+        goals: financeData.goals?.length || 0,
+        categories: financeData.categories?.length || 0,
+      }
+
+      // Get account summaries
+      const accounts =
+        financeData.accounts?.map((account: any) => ({
+          id: account.id,
+          name: account.name,
+          balance: account.balance,
+          type: account.type,
+        })) || []
+
+      // Get recent transactions
+      const recentTransactions = (financeData.transactions || [])
+        .slice(-5) // Get 5 most recent transactions
+        .map((item: any) => ({
+          id: item.id,
+          type: item.type,
+          amount: item.amount,
+          category: item.category,
+          description: item.description,
+          date: item.date,
+          account: item.account,
+        }))
+
+      return `User's finance data: ${JSON.stringify({
+        summary,
+        accounts,
+        recentTransactions,
+      })}`
+    }
+
+    return `User's finance data: ${JSON.stringify(financeData)}`
+  } catch (error) {
+    console.error("Error processing finance data:", error)
+    return ""
+  }
+}
+
+// Process meetings data
+function processMeetingsData(meetings: any[]): string {
+  try {
+    // Get today's date
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    // Get upcoming meetings
+    const upcomingMeetings = meetings.filter((meeting) => {
+      const meetingDate = new Date(meeting.date)
+      meetingDate.setHours(0, 0, 0, 0)
+      return meetingDate >= today
+    })
+
+    // Get past meetings
+    const pastMeetings = meetings.filter((meeting) => {
+      const meetingDate = new Date(meeting.date)
+      meetingDate.setHours(0, 0, 0, 0)
+      return meetingDate < today
+    })
+
+    // Format meetings
+    const formatMeetings = (meetings: any[]) =>
+      meetings.map((meeting) => ({
+        id: meeting.id,
+        title: meeting.title,
+        date: meeting.date,
+        startTime: meeting.startTime,
+        endTime: meeting.endTime,
+        location: meeting.location,
+        participants: meeting.participants,
+        agenda: meeting.agenda?.substring(0, 100) + (meeting.agenda?.length > 100 ? "..." : ""),
+      }))
+
+    return `User's meetings: ${JSON.stringify({
+      total: meetings.length,
+      upcoming: formatMeetings(upcomingMeetings.slice(0, 5)),
+      past: formatMeetings(pastMeetings.slice(-3)),
+    })}`
+  } catch (error) {
+    console.error("Error processing meetings data:", error)
+    return ""
+  }
+}
+
+// Process clients data
+function processClientsData(clients: any[]): string {
+  try {
+    // Get recent clients
+    const recentClients = clients
+      .slice(-5) // Get 5 most recent clients
+      .map((client) => ({
+        id: client.id,
+        name: client.name,
+        email: client.email,
+        phone: client.phone,
+        company: client.company,
+        projectCount: client.projects?.length || 0,
+      }))
+
+    return `User's clients: ${JSON.stringify({
+      total: clients.length,
+      recentClients,
+    })}`
+  } catch (error) {
+    console.error("Error processing clients data:", error)
+    return ""
+  }
+}
+
+// Process assignments data
+function processAssignmentsData(assignments: any[]): string {
+  try {
+    // Group assignments by status (completed/not completed)
+    const completed = assignments.filter((assignment) => assignment.completed)
+    const pending = assignments.filter((assignment) => !assignment.completed)
+
+    // Group pending assignments by due date
+    const overdue = pending.filter((assignment) => {
+      if (!assignment.dueDate) return false
+      const dueDate = new Date(assignment.dueDate)
+      return dueDate < new Date()
+    })
+
+    const dueSoon = pending.filter((assignment) => {
+      if (!assignment.dueDate) return false
+      const dueDate = new Date(assignment.dueDate)
+      const today = new Date()
+      const nextWeek = new Date()
+      nextWeek.setDate(today.getDate() + 7)
+      return dueDate >= today && dueDate <= nextWeek
+    })
+
+    // Group by course
+    const courses: Record<string, number> = {}
+    assignments.forEach((assignment) => {
+      const course = assignment.course || "Uncategorized"
+      courses[course] = (courses[course] || 0) + 1
+    })
+
+    // Create a summary
+    const summary = {
+      total: assignments.length,
+      completed: completed.length,
+      pending: pending.length,
+      overdue: overdue.length,
+      dueSoon: dueSoon.length,
+      courses,
+    }
+
+    // Include details of important assignments
+    const importantAssignments = [...overdue, ...dueSoon]
+      .filter((assignment, index, self) => index === self.findIndex((a) => a.id === assignment.id))
+      .slice(0, 5) // Limit to 5 important assignments
+      .map((assignment) => ({
+        id: assignment.id,
+        title: assignment.title,
+        description: assignment.description,
+        dueDate: assignment.dueDate,
+        course: assignment.course,
+        priority: assignment.priority,
+      }))
+
+    return `User's assignments: ${JSON.stringify({
+      summary,
+      importantAssignments,
+    })}`
+  } catch (error) {
+    console.error("Error processing assignments data:", error)
+    return ""
+  }
+}
+
+// Process flashcards data
+function processFlashcardsData(flashcards: any[]): string {
+  try {
+    // Group by deck
+    const decks: Record<string, number> = {}
+    flashcards.forEach((card) => {
+      const deck = card.deckId || "Default"
+      decks[deck] = (decks[deck] || 0) + 1
+    })
+
+    // Get sample cards
+    const sampleCards = flashcards
+      .slice(0, 5) // Get 5 sample cards
+      .map((card) => ({
+        id: card.id,
+        front: card.front?.substring(0, 50) + (card.front?.length > 50 ? "..." : ""),
+        back: card.back?.substring(0, 50) + (card.back?.length > 50 ? "..." : ""),
+        deckId: card.deckId,
+      }))
+
+    return `User's flashcards: ${JSON.stringify({
+      total: flashcards.length,
+      decks,
+      sampleCards,
+    })}`
+  } catch (error) {
+    console.error("Error processing flashcards data:", error)
+    return ""
+  }
+}
+
+// Process code snippets data
+function processCodeSnippetsData(snippets: any[]): string {
+  try {
+    // Group by language
+    const languages: Record<string, number> = {}
+    snippets.forEach((snippet) => {
+      const language = snippet.language || "Unknown"
+      languages[language] = (languages[language] || 0) + 1
+    })
+
+    // Get unique tags
+    const allTags = new Set<string>()
+    snippets.forEach((snippet) => {
+      if (snippet.tags && Array.isArray(snippet.tags)) {
+        snippet.tags.forEach((tag: string) => allTags.add(tag))
+      }
+    })
+
+    // Get recent snippets
+    const recentSnippets = snippets
+      .slice(-5) // Get 5 most recent snippets
+      .map((snippet) => ({
+        id: snippet.id,
+        title: snippet.title,
+        language: snippet.language,
+        description: snippet.description,
+        code: snippet.code?.substring(0, 50) + (snippet.code?.length > 50 ? "..." : ""),
+        tags: snippet.tags,
+      }))
+
+    return `User's code snippets: ${JSON.stringify({
+      total: snippets.length,
+      languages,
+      tags: Array.from(allTags),
+      recentSnippets,
+    })}`
+  } catch (error) {
+    console.error("Error processing code snippets data:", error)
+    return ""
+  }
+}
+
+// Process markdown documents data
+function processMarkdownData(documents: any[]): string {
+  try {
+    // Group by category
+    const categories: Record<string, number> = {}
+    documents.forEach((doc) => {
+      const category = doc.category || "Uncategorized"
+      categories[category] = (categories[category] || 0) + 1
+    })
+
+    // Get unique tags
+    const allTags = new Set<string>()
+    documents.forEach((doc) => {
+      if (doc.tags && Array.isArray(doc.tags)) {
+        doc.tags.forEach((tag: string) => allTags.add(tag))
+      }
+    })
+
+    // Get recent documents
+    const recentDocuments = documents
+      .sort((a, b) => {
+        const dateA = new Date(a.lastUpdated || a.createdAt || 0)
+        const dateB = new Date(b.lastUpdated || b.createdAt || 0)
+        return dateB.getTime() - dateA.getTime()
+      })
+      .slice(0, 5) // Get 5 most recent documents
+      .map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        content: doc.content?.substring(0, 100) + (doc.content?.length > 100 ? "..." : ""),
+        category: doc.category,
+        tags: doc.tags,
+        lastUpdated: doc.lastUpdated || doc.createdAt,
+      }))
+
+    return `User's markdown documents: ${JSON.stringify({
+      total: documents.length,
+      categories,
+      tags: Array.from(allTags),
+      recentDocuments,
+    })}`
+  } catch (error) {
+    console.error("Error processing markdown data:", error)
+    return ""
+  }
+}
+
+// Process countdown timers data
+function processCountdownTimersData(timers: any[]): string {
+  try {
+    // Get today's date
+    const today = new Date()
+
+    // Sort timers by target date
+    const sortedTimers = [...timers].sort((a, b) => {
+      const dateA = new Date(a.targetDate)
+      const dateB = new Date(b.targetDate)
+      return dateA.getTime() - dateB.getTime()
+    })
+
+    // Get upcoming timers
+    const upcomingTimers = sortedTimers.filter((timer) => {
+      const targetDate = new Date(timer.targetDate)
+      return targetDate > today
+    })
+
+    // Get expired timers
+    const expiredTimers = sortedTimers.filter((timer) => {
+      const targetDate = new Date(timer.targetDate)
+      return targetDate <= today
+    })
+
+    // Format timers
+    const formatTimers = (timers: any[]) =>
+      timers.map((timer) => ({
+        id: timer.id,
+        title: timer.title,
+        targetDate: timer.targetDate,
+        description: timer.description,
+        color: timer.color,
+      }))
+
+    return `User's countdown timers: ${JSON.stringify({
+      total: timers.length,
+      upcoming: formatTimers(upcomingTimers.slice(0, 5)),
+      expired: formatTimers(expiredTimers.slice(-3)),
+    })}`
+  } catch (error) {
+    console.error("Error processing countdown timers data:", error)
+    return ""
+  }
+}
+
 // Process remaining data types
 function processRemainingData(data: AppData): string {
   try {
-    const processedTypes = ["tasks", "notes", "bookmarks", "knowledgeItems", "plannerData", "projects", "ganttData"]
+    const processedTypes = [
+      "tasks",
+      "notes",
+      "bookmarks",
+      "knowledgeItems",
+      "plannerData",
+      "projects",
+      "ganttData",
+      "contacts",
+      "financeData",
+      "meetings",
+      "clients",
+      "assignments",
+      "flashcards",
+      "codeSnippets",
+      "markdownDocuments",
+      "countdownTimers",
+    ]
 
     const remainingData: Record<string, any> = {}
 
@@ -1100,21 +1664,6 @@ function processRemainingData(data: AppData): string {
               if ("username" in item) essentialItem.username = item.username
               if ("website" in item) essentialItem.website = item.website
               // Don't include actual passwords
-            } else if (key === "codeSnippets") {
-              if ("language" in item) essentialItem.language = item.language
-              if ("description" in item) essentialItem.description = item.description
-              // Include a truncated version of the code
-              if ("code" in item) essentialItem.code = item.code.substring(0, 50) + (item.code.length > 50 ? "..." : "")
-            } else if (key === "contacts") {
-              if ("firstName" in item) essentialItem.firstName = item.firstName
-              if ("lastName" in item) essentialItem.lastName = item.lastName
-              if ("email" in item) essentialItem.email = item.email
-              if ("company" in item) essentialItem.company = item.company
-            } else if (key === "financeData") {
-              if ("type" in item) essentialItem.type = item.type
-              if ("amount" in item) essentialItem.amount = item.amount
-              if ("category" in item) essentialItem.category = item.category
-              if ("date" in item) essentialItem.date = item.date
             } else if (key === "workoutHistory") {
               if ("date" in item) essentialItem.date = item.date
               if ("duration" in item) essentialItem.duration = item.duration
@@ -1124,10 +1673,17 @@ function processRemainingData(data: AppData): string {
                 essentialItem.exerciseCount = item.exercises.length
                 essentialItem.exerciseTypes = item.exercises.map((ex: any) => ex.name).slice(0, 3)
               }
-            } else if (key === "flashcards") {
-              if ("front" in item) essentialItem.front = item.front
-              if ("back" in item) essentialItem.back = item.back
-              if ("deckId" in item) essentialItem.deckId = item.deckId
+            } else if (key === "billingData") {
+              if ("client" in item) essentialItem.client = item.client
+              if ("amount" in item) essentialItem.amount = item.amount
+              if ("date" in item) essentialItem.date = item.date
+              if ("status" in item) essentialItem.status = item.status
+              if ("dueDate" in item) essentialItem.dueDate = item.dueDate
+            } else if (key === "citations") {
+              if ("title" in item) essentialItem.title = item.title
+              if ("source" in item) essentialItem.source = item.source
+              if ("authors" in item) essentialItem.authors = item.authors
+              if ("date" in item) essentialItem.date = item.date
             }
 
             return essentialItem

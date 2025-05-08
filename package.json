@@ -59,11 +59,13 @@
     "vaul": "^0.9.6",
     "zod": "^3.24.1",
     "@emotion/is-prop-valid": "latest",
+    "@supabase/supabase-js": "latest",
     "framer-motion": "latest",
     "web-vitals": "latest",
     "uuid": "latest",
+    "@tailwindcss/typography": "latest",
     "react-markdown": "latest",
-    "@tailwindcss/typography": "latest"
+    "@supabase/auth-helpers-nextjs": "latest"
   },
   "devDependencies": {
     "@types/node": "^22",

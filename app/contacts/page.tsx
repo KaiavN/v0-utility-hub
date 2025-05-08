@@ -63,24 +63,85 @@ export default function ContactsPage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [hasError, setHasError] = useState(false)
 
   // Load contacts and groups from localStorage
   useEffect(() => {
-    const savedContacts = getLocalStorage<Contact[]>("contacts", [])
-    const savedGroups = getLocalStorage<string[]>("contactGroups", defaultGroups)
+    try {
+      setIsLoading(true)
+      setHasError(false)
 
-    setContacts(savedContacts)
-    setGroups(savedGroups)
-  }, [])
+      const savedContacts = getLocalStorage<Contact[]>("contacts", [])
+      const savedGroups = getLocalStorage<string[]>("contactGroups", defaultGroups)
+
+      // Ensure contacts is always an array
+      setContacts(Array.isArray(savedContacts) ? savedContacts : [])
+      setGroups(Array.isArray(savedGroups) ? savedGroups : defaultGroups)
+    } catch (error) {
+      console.error("Error loading contacts:", error)
+      setHasError(true)
+      setContacts([])
+      setGroups(defaultGroups)
+
+      toast({
+        title: "Error loading contacts",
+        description: "There was a problem loading your contacts. Default values have been used.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [toast])
 
   const saveContacts = (updatedContacts: Contact[]) => {
-    setContacts(updatedContacts)
-    setLocalStorage("contacts", updatedContacts)
+    try {
+      // Ensure we're saving a valid array
+      if (!Array.isArray(updatedContacts)) {
+        console.error("Attempted to save invalid contacts data:", updatedContacts)
+        toast({
+          title: "Error saving contacts",
+          description: "Invalid data format. Changes were not saved.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      setContacts(updatedContacts)
+      setLocalStorage("contacts", updatedContacts)
+    } catch (error) {
+      console.error("Error saving contacts:", error)
+      toast({
+        title: "Error saving contacts",
+        description: "There was a problem saving your contacts.",
+        variant: "destructive",
+      })
+    }
   }
 
   const saveGroups = (updatedGroups: string[]) => {
-    setGroups(updatedGroups)
-    setLocalStorage("contactGroups", updatedGroups)
+    try {
+      // Ensure we're saving a valid array
+      if (!Array.isArray(updatedGroups)) {
+        console.error("Attempted to save invalid groups data:", updatedGroups)
+        toast({
+          title: "Error saving groups",
+          description: "Invalid data format. Changes were not saved.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      setGroups(updatedGroups)
+      setLocalStorage("contactGroups", updatedGroups)
+    } catch (error) {
+      console.error("Error saving groups:", error)
+      toast({
+        title: "Error saving groups",
+        description: "There was a problem saving your contact groups.",
+        variant: "destructive",
+      })
+    }
   }
 
   const addContact = () => {
@@ -93,35 +154,44 @@ export default function ContactsPage() {
       return
     }
 
-    const contact: Contact = {
-      ...newContact,
-      lastName: newContact.lastName || "", // Ensure lastName is never undefined
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-      favorite: false,
+    try {
+      const contact: Contact = {
+        ...newContact,
+        lastName: newContact.lastName || "", // Ensure lastName is never undefined
+        id: Date.now().toString(),
+        createdAt: new Date().toISOString(),
+        favorite: false,
+      }
+
+      const updatedContacts = [...contacts, contact]
+      saveContacts(updatedContacts)
+
+      setNewContact({
+        firstName: "",
+        lastName: "",
+        email: "",
+        phone: "",
+        address: "",
+        company: "",
+        jobTitle: "",
+        notes: "",
+        group: "Other",
+      })
+
+      setIsAddDialogOpen(false)
+
+      toast({
+        title: "Contact added",
+        description: "The contact has been added to your address book.",
+      })
+    } catch (error) {
+      console.error("Error adding contact:", error)
+      toast({
+        title: "Error adding contact",
+        description: "There was a problem adding the contact.",
+        variant: "destructive",
+      })
     }
-
-    const updatedContacts = [...contacts, contact]
-    saveContacts(updatedContacts)
-
-    setNewContact({
-      firstName: "",
-      lastName: "",
-      email: "",
-      phone: "",
-      address: "",
-      company: "",
-      jobTitle: "",
-      notes: "",
-      group: "Other",
-    })
-
-    setIsAddDialogOpen(false)
-
-    toast({
-      title: "Contact added",
-      description: "The contact has been added to your address book.",
-    })
   }
 
   const updateContact = () => {
@@ -136,58 +206,85 @@ export default function ContactsPage() {
       return
     }
 
-    // Ensure lastName is never undefined
-    const updatedEditingContact = {
-      ...editingContact,
-      lastName: editingContact.lastName || "",
+    try {
+      // Ensure lastName is never undefined
+      const updatedEditingContact = {
+        ...editingContact,
+        lastName: editingContact.lastName || "",
+      }
+
+      const updatedContacts = contacts.map((contact) =>
+        contact.id === updatedEditingContact.id ? updatedEditingContact : contact,
+      )
+
+      saveContacts(updatedContacts)
+      setEditingContact(null)
+
+      // If this is the selected contact, update it
+      if (selectedContact?.id === editingContact.id) {
+        setSelectedContact(editingContact)
+      }
+
+      toast({
+        title: "Contact updated",
+        description: "The contact information has been updated.",
+      })
+    } catch (error) {
+      console.error("Error updating contact:", error)
+      toast({
+        title: "Error updating contact",
+        description: "There was a problem updating the contact.",
+        variant: "destructive",
+      })
     }
-
-    const updatedContacts = contacts.map((contact) =>
-      contact.id === updatedEditingContact.id ? updatedEditingContact : contact,
-    )
-
-    saveContacts(updatedContacts)
-    setEditingContact(null)
-
-    // If this is the selected contact, update it
-    if (selectedContact?.id === editingContact.id) {
-      setSelectedContact(editingContact)
-    }
-
-    toast({
-      title: "Contact updated",
-      description: "The contact information has been updated.",
-    })
   }
 
   const deleteContact = (id: string) => {
-    const updatedContacts = contacts.filter((contact) => contact.id !== id)
-    saveContacts(updatedContacts)
+    try {
+      const updatedContacts = contacts.filter((contact) => contact.id !== id)
+      saveContacts(updatedContacts)
 
-    if (selectedContact?.id === id) {
-      setSelectedContact(null)
-      setIsDetailsOpen(false)
+      if (selectedContact?.id === id) {
+        setSelectedContact(null)
+        setIsDetailsOpen(false)
+      }
+
+      toast({
+        title: "Contact deleted",
+        description: "The contact has been deleted from your address book.",
+      })
+    } catch (error) {
+      console.error("Error deleting contact:", error)
+      toast({
+        title: "Error deleting contact",
+        description: "There was a problem deleting the contact.",
+        variant: "destructive",
+      })
     }
-
-    toast({
-      title: "Contact deleted",
-      description: "The contact has been deleted from your address book.",
-    })
   }
 
   const toggleFavorite = (id: string) => {
-    const updatedContacts = contacts.map((contact) =>
-      contact.id === id ? { ...contact, favorite: !contact.favorite } : contact,
-    )
+    try {
+      const updatedContacts = contacts.map((contact) =>
+        contact.id === id ? { ...contact, favorite: !contact.favorite } : contact,
+      )
 
-    saveContacts(updatedContacts)
+      saveContacts(updatedContacts)
 
-    // If this is the selected contact, update it
-    if (selectedContact?.id === id) {
-      const updatedContact = updatedContacts.find((c) => c.id === id)
-      if (updatedContact) {
-        setSelectedContact(updatedContact)
+      // If this is the selected contact, update it
+      if (selectedContact?.id === id) {
+        const updatedContact = updatedContacts.find((c) => c.id === id)
+        if (updatedContact) {
+          setSelectedContact(updatedContact)
+        }
       }
+    } catch (error) {
+      console.error("Error toggling favorite:", error)
+      toast({
+        title: "Error updating contact",
+        description: "There was a problem updating the contact's favorite status.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -210,59 +307,86 @@ export default function ContactsPage() {
       return
     }
 
-    const updatedGroups = [...groups, newGroup]
-    saveGroups(updatedGroups)
+    try {
+      const updatedGroups = [...groups, newGroup]
+      saveGroups(updatedGroups)
 
-    setNewGroup("")
-    setIsGroupDialogOpen(false)
+      setNewGroup("")
+      setIsGroupDialogOpen(false)
 
-    toast({
-      title: "Group added",
-      description: "The new contact group has been created.",
-    })
+      toast({
+        title: "Group added",
+        description: "The new contact group has been created.",
+      })
+    } catch (error) {
+      console.error("Error adding group:", error)
+      toast({
+        title: "Error adding group",
+        description: "There was a problem adding the group.",
+        variant: "destructive",
+      })
+    }
   }
 
   const deleteGroup = (group: string) => {
-    if (contacts.some((contact) => contact.group === group)) {
+    try {
+      if (contacts.some((contact) => contact.group === group)) {
+        toast({
+          title: "Cannot delete group",
+          description: "This group contains contacts. Move or delete those contacts first.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      const updatedGroups = groups.filter((g) => g !== group)
+      saveGroups(updatedGroups)
+
+      if (activeGroup === group) {
+        setActiveGroup(null)
+      }
+
       toast({
-        title: "Cannot delete group",
-        description: "This group contains contacts. Move or delete those contacts first.",
+        title: "Group deleted",
+        description: "The contact group has been deleted.",
+      })
+    } catch (error) {
+      console.error("Error deleting group:", error)
+      toast({
+        title: "Error deleting group",
+        description: "There was a problem deleting the group.",
         variant: "destructive",
       })
-      return
     }
-
-    const updatedGroups = groups.filter((g) => g !== group)
-    saveGroups(updatedGroups)
-
-    if (activeGroup === group) {
-      setActiveGroup(null)
-    }
-
-    toast({
-      title: "Group deleted",
-      description: "The contact group has been deleted.",
-    })
   }
 
   const copyToClipboard = (text: string, type: string) => {
-    navigator.clipboard.writeText(text)
+    try {
+      navigator.clipboard.writeText(text)
 
-    toast({
-      title: `${type} copied`,
-      description: `The ${type.toLowerCase()} has been copied to clipboard.`,
-    })
+      toast({
+        title: `${type} copied`,
+        description: `The ${type.toLowerCase()} has been copied to clipboard.`,
+      })
+    } catch (error) {
+      console.error("Error copying to clipboard:", error)
+      toast({
+        title: "Copy failed",
+        description: "There was a problem copying to the clipboard.",
+        variant: "destructive",
+      })
+    }
   }
 
   // Filter contacts based on search query and active group
-  const filteredContacts = (Array.isArray(contacts) ? contacts : []).filter((contact) => {
+  const filteredContacts = contacts.filter((contact) => {
     const matchesSearch =
-      `${contact.firstName} ${contact.lastName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      `${contact.firstName} ${contact.lastName || ""}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (contact.email && contact.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (contact.phone && contact.phone.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (contact.company && contact.company.toLowerCase().includes(searchQuery.toLowerCase()))
 
-    const matchesGroup = !activeGroup || contact.group === activeGroup
+    const matchesGroup = !activeGroup || (activeGroup === "favorite" ? contact.favorite : contact.group === activeGroup)
 
     return matchesSearch && matchesGroup
   })
@@ -273,7 +397,7 @@ export default function ContactsPage() {
       return a.favorite ? -1 : 1
     }
 
-    return `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`)
+    return `${a.lastName || ""} ${a.firstName}`.localeCompare(`${b.lastName || ""} ${b.firstName}`)
   })
 
   // Group contacts by first letter of last name for list view
@@ -299,6 +423,37 @@ export default function ContactsPage() {
     const firstInitial = firstName && firstName.length > 0 ? firstName[0] : ""
     const lastInitial = lastName && lastName.length > 0 ? lastName[0] : ""
     return `${firstInitial}${lastInitial}`.toUpperCase()
+  }
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="container mx-auto p-6 flex items-center justify-center h-[calc(100vh-200px)]">
+        <div className="text-center">
+          <div className="animate-spin mb-4 h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto"></div>
+          <p className="text-muted-foreground">Loading contacts...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show error state
+  if (hasError) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card className="border-red-300">
+          <CardHeader>
+            <CardTitle className="text-red-500">Error Loading Contacts</CardTitle>
+            <CardDescription>
+              There was a problem loading your contacts. Please try refreshing the page.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => window.location.reload()}>Refresh Page</Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (
@@ -373,19 +528,20 @@ export default function ContactsPage() {
                   </div>
                 </Button>
 
-                {groups.map((group) => (
-                  <div key={group} className="flex items-center">
-                    <Button variant="ghost" className="w-full justify-start" onClick={() => setActiveGroup(group)}>
-                      <div className="flex w-full items-center justify-between">
-                        <span>{group}</span>
-                        <Badge>{contacts.filter((c) => c.group === group).length}</Badge>
-                      </div>
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => deleteGroup(group)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
+                {Array.isArray(groups) &&
+                  groups.map((group) => (
+                    <div key={group} className="flex items-center">
+                      <Button variant="ghost" className="w-full justify-start" onClick={() => setActiveGroup(group)}>
+                        <div className="flex w-full items-center justify-between">
+                          <span>{group}</span>
+                          <Badge>{contacts.filter((c) => c.group === group).length}</Badge>
+                        </div>
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => deleteGroup(group)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
               </div>
             </CardContent>
           </Card>
@@ -430,7 +586,7 @@ export default function ContactsPage() {
                         </Avatar>
                         <div>
                           <CardTitle className="text-lg">
-                            {`${contact.firstName} ${contact.lastName}`}
+                            {`${contact.firstName} ${contact.lastName || ""}`}
                             {contact.favorite && <span className="ml-1 text-yellow-500">★</span>}
                           </CardTitle>
                           {contact.jobTitle && contact.company && (
@@ -523,97 +679,99 @@ export default function ContactsPage() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {sortedKeys.map((key) => (
-                        <div key={key}>
-                          <h3 className="mb-2 text-lg font-semibold">{key}</h3>
-                          <div className="space-y-1">
-                            {groupedContacts[key].map((contact) => (
-                              <div
-                                key={contact.id}
-                                className="flex cursor-pointer items-center justify-between rounded-md p-2 hover:bg-muted"
-                                onClick={() => {
-                                  setSelectedContact(contact)
-                                  setIsDetailsOpen(true)
-                                }}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <Avatar className="h-8 w-8">
-                                    <AvatarImage src={contact.avatarUrl || "/placeholder.svg"} />
-                                    <AvatarFallback
-                                      className={`${contact.favorite ? "bg-yellow-500" : "bg-primary"} text-xs`}
-                                    >
-                                      {getInitials(contact.firstName, contact.lastName || "")}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  <div>
-                                    <div className="font-medium">
-                                      {`${contact.firstName} ${contact.lastName}`}
-                                      {contact.favorite && <span className="ml-1 text-yellow-500">★</span>}
+                      {Array.isArray(sortedKeys) &&
+                        sortedKeys.map((key) => (
+                          <div key={key}>
+                            <h3 className="mb-2 text-lg font-semibold">{key}</h3>
+                            <div className="space-y-1">
+                              {groupedContacts[key] &&
+                                groupedContacts[key].map((contact) => (
+                                  <div
+                                    key={contact.id}
+                                    className="flex cursor-pointer items-center justify-between rounded-md p-2 hover:bg-muted"
+                                    onClick={() => {
+                                      setSelectedContact(contact)
+                                      setIsDetailsOpen(true)
+                                    }}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <Avatar className="h-8 w-8">
+                                        <AvatarImage src={contact.avatarUrl || "/placeholder.svg"} />
+                                        <AvatarFallback
+                                          className={`${contact.favorite ? "bg-yellow-500" : "bg-primary"} text-xs`}
+                                        >
+                                          {getInitials(contact.firstName, contact.lastName || "")}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                      <div>
+                                        <div className="font-medium">
+                                          {`${contact.firstName} ${contact.lastName || ""}`}
+                                          {contact.favorite && <span className="ml-1 text-yellow-500">★</span>}
+                                        </div>
+                                        {contact.email && (
+                                          <div className="text-xs text-muted-foreground">{contact.email}</div>
+                                        )}
+                                      </div>
                                     </div>
-                                    {contact.email && (
-                                      <div className="text-xs text-muted-foreground">{contact.email}</div>
-                                    )}
-                                  </div>
-                                </div>
-                                <div className="flex items-center">
-                                  {contact.phone && (
-                                    <div className="mr-4 flex items-center gap-1 text-sm">
-                                      <Phone className="h-3 w-3 text-muted-foreground" />
-                                      <span>{contact.phone}</span>
+                                    <div className="flex items-center">
+                                      {contact.phone && (
+                                        <div className="mr-4 flex items-center gap-1 text-sm">
+                                          <Phone className="h-3 w-3 text-muted-foreground" />
+                                          <span>{contact.phone}</span>
+                                        </div>
+                                      )}
+                                      <div className="flex gap-1">
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-7 w-7"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            toggleFavorite(contact.id)
+                                          }}
+                                        >
+                                          <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            viewBox="0 0 24 24"
+                                            fill={contact.favorite ? "currentColor" : "none"}
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            className={`h-4 w-4 ${contact.favorite ? "text-yellow-500" : "text-muted-foreground"}`}
+                                          >
+                                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                                          </svg>
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-7 w-7"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            setEditingContact(contact)
+                                          }}
+                                        >
+                                          <Edit className="h-3 w-3" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-7 w-7"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            deleteContact(contact.id)
+                                          }}
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      </div>
                                     </div>
-                                  )}
-                                  <div className="flex gap-1">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-7 w-7"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        toggleFavorite(contact.id)
-                                      }}
-                                    >
-                                      <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        viewBox="0 0 24 24"
-                                        fill={contact.favorite ? "currentColor" : "none"}
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        className={`h-4 w-4 ${contact.favorite ? "text-yellow-500" : "text-muted-foreground"}`}
-                                      >
-                                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                                      </svg>
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-7 w-7"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        setEditingContact(contact)
-                                      }}
-                                    >
-                                      <Edit className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-7 w-7"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        deleteContact(contact.id)
-                                      }}
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
                                   </div>
-                                </div>
-                              </div>
-                            ))}
+                                ))}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
                     </div>
                   )}
                 </ScrollArea>
@@ -709,11 +867,12 @@ export default function ContactsPage() {
                   <SelectValue placeholder="Select group" />
                 </SelectTrigger>
                 <SelectContent>
-                  {groups.map((group) => (
-                    <SelectItem key={group} value={group}>
-                      {group}
-                    </SelectItem>
-                  ))}
+                  {Array.isArray(groups) &&
+                    groups.map((group) => (
+                      <SelectItem key={group} value={group}>
+                        {group}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -816,11 +975,12 @@ export default function ContactsPage() {
                     <SelectValue placeholder="Select group" />
                   </SelectTrigger>
                   <SelectContent>
-                    {groups.map((group) => (
-                      <SelectItem key={group} value={group}>
-                        {group}
-                      </SelectItem>
-                    ))}
+                    {Array.isArray(groups) &&
+                      groups.map((group) => (
+                        <SelectItem key={group} value={group}>
+                          {group}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -887,7 +1047,7 @@ export default function ContactsPage() {
                 </Avatar>
                 <div>
                   <h2 className="text-2xl font-bold">
-                    {`${selectedContact.firstName} ${selectedContact.lastName}`}
+                    {`${selectedContact.firstName} ${selectedContact.lastName || ""}`}
                     {selectedContact.favorite && <span className="ml-2 text-yellow-500">★</span>}
                   </h2>
                   {selectedContact.jobTitle && selectedContact.company && (

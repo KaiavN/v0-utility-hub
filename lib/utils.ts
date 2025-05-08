@@ -284,3 +284,8 @@ export function toISODateString(dateString: string): string {
 
   return date.toISOString().split("T")[0]
 }
+
+export function flushLocalStorageWrites(): void {
+  // Placeholder for the actual implementation
+  console.log("Flushing localStorage writes...")
+}

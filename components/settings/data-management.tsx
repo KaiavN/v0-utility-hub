@@ -2,56 +2,62 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { exportAllData } from "@/lib/data-transfer"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ImportDataDialog } from "./import-data-dialog"
-import { AlertCircle, Download, Upload } from "lucide-react"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { exportAllData } from "@/lib/data-transfer"
+import { DataBackupManager } from "@/components/data-backup-manager"
 
 export function DataManagement() {
-  const [showImportDialog, setShowImportDialog] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
 
   const handleExport = async () => {
+    setIsExporting(true)
     try {
-      setIsExporting(true)
       await exportAllData()
     } catch (error) {
-      console.error("Export failed:", error)
+      console.error("Export error:", error)
     } finally {
       setIsExporting(false)
     }
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Data Management</CardTitle>
-        <CardDescription>Export your data for backup or import from a previous backup</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Important</AlertTitle>
-          <AlertDescription>
-            Always backup your data regularly to prevent loss. Your data is stored locally in your browser.
-          </AlertDescription>
-        </Alert>
+    <Tabs defaultValue="backup">
+      <TabsList className="grid w-full grid-cols-2">
+        <TabsTrigger value="backup">Backup & Restore</TabsTrigger>
+        <TabsTrigger value="advanced">Advanced</TabsTrigger>
+      </TabsList>
 
-        <div className="flex flex-col sm:flex-row gap-4">
-          <Button onClick={handleExport} disabled={isExporting} className="flex-1">
-            <Download className="mr-2 h-4 w-4" />
-            {isExporting ? "Exporting..." : "Export All Data"}
-          </Button>
+      <TabsContent value="backup" className="space-y-4 py-4">
+        <DataBackupManager />
+      </TabsContent>
 
-          <Button onClick={() => setShowImportDialog(true)} variant="outline" className="flex-1">
-            <Upload className="mr-2 h-4 w-4" />
-            Import Data
-          </Button>
-        </div>
+      <TabsContent value="advanced" className="space-y-4 py-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Data Management</CardTitle>
+            <CardDescription>Export or import your application data</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Export all your data to a JSON file for backup or transfer to another device. Import previously exported
+              data to restore your information.
+            </p>
+          </CardContent>
+          <CardFooter className="flex justify-between">
+            <Button variant="outline" onClick={handleExport} disabled={isExporting}>
+              {isExporting ? "Exporting..." : "Export All Data"}
+            </Button>
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
+              Import Data
+            </Button>
+          </CardFooter>
+        </Card>
+      </TabsContent>
 
-        {showImportDialog && <ImportDataDialog onClose={() => setShowImportDialog(false)} />}
-      </CardContent>
-    </Card>
+      <ImportDataDialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen} />
+    </Tabs>
   )
 }
