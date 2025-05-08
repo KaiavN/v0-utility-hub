@@ -17,10 +17,11 @@ interface AuthContextType {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
-  login: (email: string, password: string) => Promise<boolean>
   loginWithGitHub: () => Promise<void>
+  loginWithGoogle: () => Promise<void>
   logout: () => Promise<void>
-  resetPassword: (email: string) => Promise<boolean>
+  profile: any | null
+  updateProfile: (data: any) => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -34,6 +35,7 @@ const createDirectSupabaseClient = () => {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [profile, setProfile] = useState<any | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
@@ -63,14 +65,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           setUser(userData)
           setIsAuthenticated(true)
+
+          // Fetch user profile
+          const { data: profileData } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
+
+          if (profileData) {
+            setProfile(profileData)
+          }
         } else {
           // No active session
           setUser(null)
+          setProfile(null)
           setIsAuthenticated(false)
         }
       } catch (error) {
         console.error("Error loading user:", error)
         setUser(null)
+        setProfile(null)
         setIsAuthenticated(false)
       } finally {
         setIsLoading(false)
@@ -82,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Set up auth state change listener
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "SIGNED_IN" && session) {
         // User signed in
         const userData: User = {
@@ -94,9 +105,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setUser(userData)
         setIsAuthenticated(true)
+
+        // Fetch user profile
+        const { data: profileData } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
+
+        if (profileData) {
+          setProfile(profileData)
+        }
       } else if (event === "SIGNED_OUT" || event === "USER_DELETED") {
         // User signed out
         setUser(null)
+        setProfile(null)
         setIsAuthenticated(false)
       }
     })
@@ -110,6 +129,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithGitHub = async (): Promise<void> => {
     try {
       setIsLoading(true)
+
+      // Store the current path to redirect back after login
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
+      }
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
@@ -138,48 +162,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Simplified login function (kept for backward compatibility)
-  const login = async (email: string, password: string): Promise<boolean> => {
-    if (!email || !password) {
-      toast({
-        title: "Login Failed",
-        description: "Email and password are required",
-        variant: "destructive",
-      })
-      return false
-    }
-
+  // Google authentication function
+  const loginWithGoogle = async (): Promise<void> => {
     try {
       setIsLoading(true)
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      // Store the current path to redirect back after login
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
+      }
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
       })
 
       if (error) {
+        console.error("Google login error:", error)
         toast({
           title: "Login Failed",
-          description: error.message || "Invalid email or password",
+          description: error.message || "Failed to login with Google",
           variant: "destructive",
         })
-        return false
       }
-
-      toast({
-        title: "Login Successful",
-        description: "Welcome back!",
-      })
-
-      return true
     } catch (error) {
-      console.error("Login error:", error)
+      console.error("Google login unexpected error:", error)
       toast({
         title: "Login Failed",
         description: "An unexpected error occurred",
         variant: "destructive",
       })
-      return false
     } finally {
       setIsLoading(false)
     }
@@ -191,6 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(true)
       await supabase.auth.signOut()
       setUser(null)
+      setProfile(null)
       setIsAuthenticated(false)
       toast({
         title: "Logged Out",
@@ -209,41 +224,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Simplified reset password function
-  const resetPassword = async (email: string): Promise<boolean> => {
-    if (!email) {
-      toast({
-        title: "Password Reset Failed",
-        description: "Email is required",
-        variant: "destructive",
-      })
-      return false
-    }
+  // Update profile function
+  const updateProfile = async (data: any): Promise<boolean> => {
+    if (!user) return false
 
     try {
       setIsLoading(true)
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      })
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          username: data.username,
+          display_name: data.displayName,
+          avatar_url: data.avatarUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id)
 
       if (error) {
+        console.error("Error updating profile:", error)
         toast({
-          title: "Password Reset Failed",
-          description: error.message || "Failed to send reset email",
+          title: "Update Failed",
+          description: error.message || "Failed to update profile",
           variant: "destructive",
         })
         return false
       }
 
-      toast({
-        title: "Password Reset Email Sent",
-        description: "Check your email for a link to reset your password",
+      // Update local user state
+      setUser({
+        ...user,
+        name: data.displayName || user.name,
+        avatarUrl: data.avatarUrl || user.avatarUrl,
       })
+
+      // Fetch updated profile
+      const { data: updatedProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single()
+
+      if (updatedProfile) {
+        setProfile(updatedProfile)
+      }
+
+      toast({
+        title: "Profile Updated",
+        description: "Your profile has been updated successfully",
+      })
+
       return true
     } catch (error) {
-      console.error("Reset password error:", error)
+      console.error("Update profile error:", error)
       toast({
-        title: "Password Reset Failed",
+        title: "Update Failed",
         description: "An unexpected error occurred",
         variant: "destructive",
       })
@@ -257,12 +288,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        profile,
         isAuthenticated,
         isLoading,
-        login,
         loginWithGitHub,
+        loginWithGoogle,
         logout,
-        resetPassword,
+        updateProfile,
       }}
     >
       {children}

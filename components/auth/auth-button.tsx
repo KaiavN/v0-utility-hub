@@ -1,9 +1,6 @@
 "use client"
 
-import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { LoginModal } from "./login-modal"
-import { ForgotPasswordModal } from "./forgot-password-modal"
 import { useAuth } from "@/contexts/auth-context"
 import { LogOut, User } from "lucide-react"
 import Link from "next/link"
@@ -15,22 +12,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { GitHubLoginButton } from "./github-login-button"
+import { GoogleLoginButton } from "./google-login-button"
 
 export function AuthButton() {
-  const [showLoginModal, setShowLoginModal] = useState(false)
-  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false)
-  const [loginEmail, setLoginEmail] = useState("")
   const { user, logout } = useAuth()
-
-  const handleSwitchToLogin = () => {
-    setShowForgotPasswordModal(false)
-    setShowLoginModal(true)
-  }
-
-  const handleSwitchToForgotPassword = () => {
-    setShowLoginModal(false)
-    setShowForgotPasswordModal(true)
-  }
 
   const handleLogout = async () => {
     await logout()
@@ -71,26 +56,9 @@ export function AuthButton() {
   }
 
   return (
-    <>
-      <div className="flex gap-2">
-        <GitHubLoginButton variant="outline" size="sm" />
-        <Button variant="outline" size="sm" onClick={() => setShowLoginModal(true)}>
-          Login
-        </Button>
-      </div>
-
-      <LoginModal
-        open={showLoginModal}
-        onOpenChange={setShowLoginModal}
-        onSwitchToForgotPassword={handleSwitchToForgotPassword}
-        initialEmail={loginEmail}
-      />
-
-      <ForgotPasswordModal
-        open={showForgotPasswordModal}
-        onOpenChange={setShowForgotPasswordModal}
-        onSwitchToLogin={handleSwitchToLogin}
-      />
-    </>
+    <div className="flex gap-2">
+      <GitHubLoginButton variant="outline" size="sm" />
+      <GoogleLoginButton variant="outline" size="sm" />
+    </div>
   )
 }
