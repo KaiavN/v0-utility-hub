@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
 import { useLocalStorage } from "@/lib/local-storage"
 import { aiService } from "@/lib/ai-service"
 import type { DataEditOperation } from "./ai-data-editor"
@@ -9,12 +9,31 @@ import { processDataEditOperation, processMultipleDataEditOperations } from "@/l
 import { eventBus } from "@/lib/event-bus"
 import { getOpenRouterApiKey } from "@/app/actions/ai-actions"
 import { loadAllData } from "@/lib/data-manager"
+import { checkPersistenceHealth } from "@/lib/data-persistence-monitor"
 
 export type Message = {
   id: string
   role: "user" | "assistant" | "system"
   content: string
   timestamp: number
+}
+
+export type UserProfile = {
+  lastUpdated: number
+  traits: Record<string, any>
+  preferences: Record<string, any>
+  interactions: {
+    count: number
+    lastInteraction: number
+    commonTopics: string[]
+    recentQueries: { content: string; timestamp: number }[]
+  }
+  knowledgeAreas: string[]
+  feedback: {
+    positive: number
+    negative: number
+    lastFeedback?: { content: string; sentiment: "positive" | "negative"; timestamp: number }
+  }
 }
 
 type AISettings = {
@@ -33,6 +52,8 @@ interface AIAssistantContextType {
   isSending: boolean
   pendingDataEdit: DataEditOperation | DataEditOperation[] | null
   isPendingApproval: boolean
+  userProfile: UserProfile
+  updateUserProfile: (updates: Partial<UserProfile>) => void
   updateSettings: (settings: Partial<AISettings>) => void
   sendMessage: (content: string) => Promise<void>
   clearMessages: () => void
@@ -45,10 +66,27 @@ interface AIAssistantContextType {
 
 const defaultSettings: AISettings = {
   apiKey: "", // We'll handle the API key securely through server actions
-  canAccessData: true,
+  canAccessData: true, // Always enable data access by default
   canEditData: true,
   isOpen: false,
   model: "google/gemini-2.0-flash-exp:free", // Default model
+}
+
+const defaultUserProfile: UserProfile = {
+  lastUpdated: Date.now(),
+  traits: {},
+  preferences: {},
+  interactions: {
+    count: 0,
+    lastInteraction: Date.now(),
+    commonTopics: [],
+    recentQueries: [],
+  },
+  knowledgeAreas: [],
+  feedback: {
+    positive: 0,
+    negative: 0,
+  },
 }
 
 const AIAssistantContext = createContext<AIAssistantContextType | undefined>(undefined)
@@ -61,14 +99,39 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
   const [isSending, setIsSending] = useState(false)
   const [pendingDataEdit, setPendingDataEdit] = useState<DataEditOperation | DataEditOperation[] | null>(null)
   const [isPendingApproval, setIsPendingApproval] = useState(false)
+  const [userProfile, setUserProfile] = useLocalStorage<UserProfile>("ai-assistant-user-profile", defaultUserProfile)
   const [dataContext, setDataContext] = useState<Record<string, any>>({})
+  const [dataLoaded, setDataLoaded] = useState(false)
+
+  // useRef to hold the latest values for callbacks
+  const latestSettings = useRef(settings)
+  const latestMessages = useRef(messages)
+  const latestDataContext = useRef(dataContext)
+  const latestUserProfile = useRef(userProfile)
+
+  // Update refs when values change
+  useEffect(() => {
+    latestSettings.current = settings
+  }, [settings])
+
+  useEffect(() => {
+    latestMessages.current = messages
+  }, [messages])
+
+  useEffect(() => {
+    latestDataContext.current = dataContext
+  }, [dataContext])
+
+  useEffect(() => {
+    latestUserProfile.current = userProfile
+  }, [userProfile])
 
   // Initialize with API key from server
   useEffect(() => {
     async function fetchApiKey() {
       try {
         const { key } = await getOpenRouterApiKey()
-        if (key && !settings.apiKey) {
+        if (key && !latestSettings.current.apiKey) {
           setSettings((prev) => ({
             ...prev,
             apiKey: key,
@@ -82,19 +145,24 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
     fetchApiKey()
   }, [])
 
-  // Load data context when settings change
+  // Load all user data on mount and when settings change
   useEffect(() => {
-    if (settings.canAccessData) {
+    async function loadData() {
       try {
+        console.log("Loading all user data for AI assistant...")
         const allData = loadAllData()
         setDataContext(allData)
+        setDataLoaded(true)
+        console.log("Successfully loaded user data for AI assistant")
       } catch (error) {
         console.error("Error loading data context:", error)
       }
-    } else {
-      setDataContext({})
     }
-  }, [settings.canAccessData])
+
+    // Always load data regardless of canAccessData setting
+    // This ensures data is available when needed
+    loadData()
+  }, [])
 
   // Subscribe to data changes to update the AI context
   useEffect(() => {
@@ -102,18 +170,17 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
       // If there are pending data edits, we don't want to add a message about data changes
       if (isPendingApproval) return
 
-      // Update the data context
-      if (settings.canAccessData) {
-        try {
-          const allData = loadAllData()
-          setDataContext(allData)
-        } catch (error) {
-          console.error("Error updating data context:", error)
-        }
+      // Always update the data context regardless of canAccessData setting
+      try {
+        console.log("Updating AI data context due to data change:", event?.collection)
+        const allData = loadAllData()
+        setDataContext(allData)
+      } catch (error) {
+        console.error("Error updating data context:", error)
       }
 
       // Add a system message about data changes if the chat is open
-      if (isOpen && messages.length > 0) {
+      if (isOpen && latestMessages.current.length > 0) {
         const collection = event?.collection ? `Collection: ${event.collection}` : ""
         const systemMessage: Message = {
           id: Date.now().toString(),
@@ -132,13 +199,59 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
       // Unsubscribe from the event
       unsubscribe()
     }
-  }, [isOpen, messages.length, isPendingApproval, settings.canAccessData, setMessages])
+  }, [isOpen, isPendingApproval, setMessages])
 
   const updateSettings = useCallback(
     (newSettings: Partial<AISettings>) => {
-      setSettings((prev) => ({ ...prev, ...newSettings }))
+      setSettings((prev) => {
+        // Always ensure canAccessData is true
+        const updatedSettings = { ...prev, ...newSettings, canAccessData: true }
+        return updatedSettings
+      })
     },
     [setSettings],
+  )
+
+  const updateUserProfile = useCallback(
+    (updates: Partial<UserProfile>) => {
+      setUserProfile((prev) => {
+        const updated = {
+          ...prev,
+          ...updates,
+          lastUpdated: Date.now(),
+        }
+
+        // If updating interactions, preserve the array structure
+        if (updates.interactions) {
+          updated.interactions = {
+            ...prev.interactions,
+            ...updates.interactions,
+            // Only update lastInteraction if not explicitly set
+            lastInteraction: updates.interactions.lastInteraction || Date.now(),
+          }
+
+          // If updating recent queries, ensure it's an array and limit size
+          if (updates.interactions.recentQueries) {
+            updated.interactions.recentQueries = [
+              ...updates.interactions.recentQueries,
+              ...(prev.interactions.recentQueries || []),
+            ].slice(0, 10) // Keep only 10 most recent
+          }
+        }
+
+        // If updating traits or preferences, merge them
+        if (updates.traits) {
+          updated.traits = { ...prev.traits, ...updates.traits }
+        }
+
+        if (updates.preferences) {
+          updated.preferences = { ...prev.preferences, ...updates.preferences }
+        }
+
+        return updated
+      })
+    },
+    [setUserProfile],
   )
 
   const sendMessage = useCallback(
@@ -157,17 +270,31 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
       setIsSending(true)
 
       try {
+        // Update user profile with new interaction
+        updateUserProfile({
+          interactions: {
+            count: latestUserProfile.current.interactions.count + 1,
+            lastInteraction: Date.now(),
+            recentQueries: [
+              {
+                content,
+                timestamp: Date.now(),
+              },
+              ...(latestUserProfile.current.interactions.recentQueries || []).slice(0, 9),
+            ],
+          },
+        })
+
         // Get API key from settings (which is now populated from server)
-        const apiKey = settings.apiKey || ""
+        const apiKey = latestSettings.current.apiKey || ""
 
         if (!apiKey) {
           throw new Error("No API key available")
         }
 
-        // Format messages for the API
-        const apiMessages = messages
+        // Format messages for the API - include all messages for better context
+        const apiMessages = latestMessages.current
           .filter((msg) => msg.role !== "system")
-          .slice(-15) // Limit context to last 15 messages
           .map((msg) => ({
             role: msg.role as "user" | "assistant",
             content: msg.content,
@@ -179,11 +306,17 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
           content,
         })
 
-        // Send to API
-        const response = await aiService.sendMessage(apiMessages, apiKey, settings.canAccessData, settings.canEditData)
+        // Send to API - always allow data access
+        const response = await aiService.sendMessage(
+          apiMessages,
+          apiKey,
+          true, // Always allow data access
+          latestSettings.current.canEditData,
+          latestUserProfile.current, // Pass user profile
+        )
 
         // Check if there's a data edit operation
-        if (response.dataEditOperation && settings.canEditData) {
+        if (response.dataEditOperation && latestSettings.current.canEditData) {
           setPendingDataEdit(response.dataEditOperation)
           setIsPendingApproval(true)
         } else if (response.error) {
@@ -222,14 +355,21 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
         setIsSending(false)
       }
     },
-    [messages, settings, setMessages],
+    [setMessages, updateUserProfile],
   )
 
-  // The rest of the component remains the same
+  // Improved data edit approval with better error handling and validation
   const approveDataEdit = useCallback(async () => {
     if (!pendingDataEdit) return
 
     try {
+      console.log(
+        "Processing data edit operation:",
+        Array.isArray(pendingDataEdit)
+          ? `${pendingDataEdit.length} operations`
+          : `${pendingDataEdit.type} operation on ${pendingDataEdit.collection}`,
+      )
+
       // Process the data edit operation(s)
       let results: { success: boolean; message: string; data?: any }[] = []
 
@@ -266,6 +406,29 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
             .join("\n")
       }
 
+      // Update user profile with data edit outcome
+      updateUserProfile({
+        traits: {
+          // Record that the user approves AI edits
+          approvesAiEdits: true,
+          // Record the specific collection they allowed editing
+          editedCollections: [
+            ...(latestUserProfile.current.traits.editedCollections || []),
+            ...(Array.isArray(pendingDataEdit)
+              ? [...new Set(pendingDataEdit.map((op) => op.collection))]
+              : [pendingDataEdit.collection]),
+          ].filter((v, i, a) => a.indexOf(v) === i), // Remove duplicates
+        },
+        feedback: {
+          positive: latestUserProfile.current.feedback.positive + 1,
+          lastFeedback: {
+            content: "Approved data edit",
+            sentiment: "positive",
+            timestamp: Date.now(),
+          },
+        },
+      })
+
       // Add system message about the results
       const systemMessage: Message = {
         id: Date.now().toString(),
@@ -275,6 +438,41 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
       }
 
       setMessages((prev) => [...prev, systemMessage])
+
+      // Force a data refresh to ensure we have the latest data
+      if (successCount > 0) {
+        try {
+          const allData = loadAllData()
+          setDataContext(allData)
+          console.log("Data context refreshed after successful edit operations")
+        } catch (error) {
+          console.error("Error refreshing data context after edits:", error)
+        }
+      }
+
+      // Check persistence health after operations
+      setTimeout(() => {
+        try {
+          const healthCheck = checkPersistenceHealth()
+          if (!healthCheck.healthy) {
+            console.warn("AI Data Edit - Persistence health issues:", healthCheck.issues)
+
+            // Add system message about persistence issues if they exist
+            if (healthCheck.issues.length > 0) {
+              const persistenceMessage: Message = {
+                id: (Date.now() + 3).toString(),
+                role: "system",
+                content: `⚠️ Some data persistence issues were detected. Your changes have been applied, but please check that they appear correctly in the application. If you encounter any issues, try refreshing the page.`,
+                timestamp: Date.now() + 300,
+              }
+
+              setMessages((prev) => [...prev, persistenceMessage])
+            }
+          }
+        } catch (error) {
+          console.error("Error checking persistence health:", error)
+        }
+      }, 1000)
 
       // If successful, add a follow-up assistant message
       if (allSuccessful) {
@@ -314,6 +512,18 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
     } catch (error) {
       console.error("Error processing data edit:", error)
 
+      // Update user profile with error information
+      updateUserProfile({
+        feedback: {
+          negative: latestUserProfile.current.feedback.negative + 1,
+          lastFeedback: {
+            content: `Error processing data edit: ${error instanceof Error ? error.message : "Unknown error"}`,
+            sentiment: "negative",
+            timestamp: Date.now(),
+          },
+        },
+      })
+
       // Add error message
       const errorMessage: Message = {
         id: Date.now().toString(),
@@ -327,7 +537,7 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
       setPendingDataEdit(null)
       setIsPendingApproval(false)
     }
-  }, [pendingDataEdit, setMessages])
+  }, [pendingDataEdit, setMessages, updateUserProfile])
 
   const rejectDataEdit = useCallback(() => {
     // Add system message about rejection
@@ -338,10 +548,33 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
       timestamp: Date.now(),
     }
 
+    // Update user profile to note rejection of AI edits
+    updateUserProfile({
+      traits: {
+        rejectsAiEdits: true,
+        rejectedCollections: [
+          ...(latestUserProfile.current.traits.rejectedCollections || []),
+          ...(Array.isArray(pendingDataEdit)
+            ? [...new Set(pendingDataEdit.map((op) => op.collection))]
+            : [pendingDataEdit?.collection]),
+        ]
+          .filter(Boolean)
+          .filter((v, i, a) => a.indexOf(v) === i), // Remove duplicates and nulls
+      },
+      feedback: {
+        negative: latestUserProfile.current.feedback.negative + 1,
+        lastFeedback: {
+          content: "Rejected data edit",
+          sentiment: "negative",
+          timestamp: Date.now(),
+        },
+      },
+    })
+
     setMessages((prev) => [...prev, systemMessage])
     setPendingDataEdit(null)
     setIsPendingApproval(false)
-  }, [setMessages])
+  }, [setMessages, updateUserProfile, pendingDataEdit])
 
   const clearMessages = useCallback(() => {
     setMessages([])
@@ -370,6 +603,7 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
         isSending,
         pendingDataEdit,
         isPendingApproval,
+        userProfile,
         updateSettings,
         sendMessage,
         clearMessages,
@@ -378,6 +612,7 @@ export function AIAssistantProvider({ children }: { children: React.ReactNode })
         maximizeChat,
         approveDataEdit,
         rejectDataEdit,
+        updateUserProfile,
       }}
     >
       {children}

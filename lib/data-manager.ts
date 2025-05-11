@@ -438,76 +438,122 @@ export function repairCorruptedData(): void {
 }
 
 // Add a function to force immediate write of all pending data
+// Enhance the forceSaveAllData function to be more reliable
 export function forceSaveAllData(data?: AppData): void {
   console.log("🔄 Data Manager: forceSaveAllData called")
 
-  const dataToSave = data || loadAllData()
-  const updates: Record<string, any> = {}
+  try {
+    const dataToSave = data || loadAllData()
+    const updates: Record<string, any> = {}
 
-  // Special handling for plannerData to ensure it's saved properly
-  if (typeof window !== "undefined") {
-    try {
-      const rawData = window.localStorage.getItem("plannerData")
-      if (rawData) {
-        try {
-          const plannerData = JSON.parse(rawData)
-          console.log(
-            "🔄 Data Manager: Found existing plannerData with",
-            plannerData.blocks ? plannerData.blocks.length : 0,
-            "blocks",
-          )
+    // Special handling for plannerData to ensure it's saved properly
+    if (typeof window !== "undefined") {
+      try {
+        const rawData = window.localStorage.getItem("plannerData")
+        if (rawData) {
+          try {
+            const plannerData = JSON.parse(rawData)
+            console.log(
+              "🔄 Data Manager: Found existing plannerData with",
+              plannerData.blocks ? plannerData.blocks.length : 0,
+              "blocks",
+            )
 
-          // Make sure we're not overwriting with empty data
-          if (
-            dataToSave.plannerData &&
-            (!dataToSave.plannerData.blocks || dataToSave.plannerData.blocks.length === 0) &&
-            plannerData.blocks &&
-            plannerData.blocks.length > 0
-          ) {
-            console.log("⚠️ Data Manager: Preventing overwrite of plannerData with empty blocks")
-            dataToSave.plannerData = plannerData
+            // Make sure we're not overwriting with empty data
+            if (
+              dataToSave.plannerData &&
+              (!dataToSave.plannerData.blocks || dataToSave.plannerData.blocks.length === 0) &&
+              plannerData.blocks &&
+              plannerData.blocks.length > 0
+            ) {
+              console.log("⚠️ Data Manager: Preventing overwrite of plannerData with empty blocks")
+              dataToSave.plannerData = plannerData
+            }
+
+            // Force an immediate save to ensure data persistence
+            window.localStorage.setItem("plannerData", JSON.stringify(dataToSave.plannerData || plannerData))
+            console.log(
+              "✅ Data Manager: Forced immediate save of plannerData with",
+              dataToSave.plannerData?.blocks?.length || plannerData.blocks?.length || 0,
+              "blocks",
+            )
+          } catch (error) {
+            console.error("❌ Data Manager: Error parsing plannerData in forceSaveAllData:", error)
           }
-
-          // Force an immediate save to ensure data persistence
-          window.localStorage.setItem("plannerData", JSON.stringify(dataToSave.plannerData || plannerData))
+        } else if (dataToSave.plannerData) {
+          // No existing data, but we have data to save
+          window.localStorage.setItem("plannerData", JSON.stringify(dataToSave.plannerData))
           console.log(
-            "✅ Data Manager: Forced immediate save of plannerData with",
-            dataToSave.plannerData?.blocks?.length || plannerData.blocks?.length || 0,
+            "✅ Data Manager: Saved new plannerData with",
+            dataToSave.plannerData.blocks?.length || 0,
             "blocks",
           )
-        } catch (error) {
-          console.error("❌ Data Manager: Error parsing plannerData in forceSaveAllData:", error)
         }
-      } else if (dataToSave.plannerData) {
-        // No existing data, but we have data to save
-        window.localStorage.setItem("plannerData", JSON.stringify(dataToSave.plannerData))
-        console.log("✅ Data Manager: Saved new plannerData with", dataToSave.plannerData.blocks?.length || 0, "blocks")
+      } catch (error) {
+        console.error("❌ Data Manager: Error accessing localStorage in forceSaveAllData:", error)
       }
-    } catch (error) {
-      console.error("❌ Data Manager: Error accessing localStorage in forceSaveAllData:", error)
     }
+
+    // Special handling for ganttData to ensure it's saved properly
+    if (typeof window !== "undefined" && dataToSave.ganttData) {
+      try {
+        const ganttDataString = JSON.stringify(dataToSave.ganttData)
+        window.localStorage.setItem("ganttData", ganttDataString)
+        console.log("✅ Data Manager: Forced immediate save of ganttData")
+      } catch (error) {
+        console.error("❌ Data Manager: Error saving ganttData:", error)
+      }
+    }
+
+    // Prepare updates for each data category
+    Object.entries(DATA_KEYS).forEach(([key, storageKey]) => {
+      const value = dataToSave[key as keyof AppData]
+      if (value !== undefined) {
+        updates[storageKey] = value
+      }
+    })
+
+    // Batch save all updates immediately
+    batchSetLocalStorage(updates, true)
+    logger.success("Forced save of all data completed")
+
+    // Emit events for each updated data category
+    Object.entries(DATA_KEYS).forEach(([key, storageKey]) => {
+      const value = dataToSave[key as keyof AppData]
+      if (value !== undefined) {
+        eventBus.publish(`data:${key}:updated`, value)
+        eventBus.publish("data:updated", { collection: key })
+      }
+    })
+
+    // Verify data was saved correctly
+    setTimeout(() => {
+      try {
+        // Check a few key collections to ensure they were saved
+        if (dataToSave.ganttData) {
+          const savedGanttData = getLocalStorage("ganttData", null)
+          if (!savedGanttData) {
+            console.error("❌ Data Manager: ganttData was not saved correctly")
+            // Try again
+            window.localStorage.setItem("ganttData", JSON.stringify(dataToSave.ganttData))
+          }
+        }
+
+        if (dataToSave.plannerData) {
+          const savedPlannerData = getLocalStorage("plannerData", null)
+          if (!savedPlannerData) {
+            console.error("❌ Data Manager: plannerData was not saved correctly")
+            // Try again
+            window.localStorage.setItem("plannerData", JSON.stringify(dataToSave.plannerData))
+          }
+        }
+      } catch (error) {
+        console.error("❌ Data Manager: Error verifying data save:", error)
+      }
+    }, 500)
+  } catch (error) {
+    console.error("❌ Data Manager: Error in forceSaveAllData:", error)
   }
-
-  // Prepare updates for each data category
-  Object.entries(DATA_KEYS).forEach(([key, storageKey]) => {
-    const value = dataToSave[key as keyof AppData]
-    if (value !== undefined) {
-      updates[storageKey] = value
-    }
-  })
-
-  // Batch save all updates immediately
-  batchSetLocalStorage(updates, true)
-  logger.success("Forced save of all data completed")
-
-  // Emit events for each updated data category
-  Object.entries(DATA_KEYS).forEach(([key, storageKey]) => {
-    const value = dataToSave[key as keyof AppData]
-    if (value !== undefined) {
-      eventBus.publish(`data:${key}:updated`, value)
-      eventBus.publish("data:updated", { collection: key })
-    }
-  })
 }
 
 // Data migration function (example)
@@ -536,6 +582,7 @@ export function checkAndRepairData(): void {
 }
 
 // Save specific data category
+// Enhance the saveData function to be more reliable
 export function saveData<T>(category: keyof AppData, data: T): void {
   const storageKey = DATA_KEYS[category]
   if (!storageKey) {
@@ -544,29 +591,44 @@ export function saveData<T>(category: keyof AppData, data: T): void {
   }
 
   try {
-    if (category === "plannerData") {
-      logger.group(`💾 saveData: plannerData`)
-      logger.info(`Saving plannerData...`)
+    if (category === "plannerData" || category === "ganttData") {
+      logger.group(`💾 saveData: ${category}`)
+      logger.info(`Saving ${category}...`)
 
       // Log the data structure
       if (data) {
-        const plannerData = data as any
-        logger.debug("Data structure check:", {
-          hasBlocks: !!plannerData.blocks,
-          blocksIsArray: Array.isArray(plannerData.blocks),
-          blocksLength: Array.isArray(plannerData.blocks) ? plannerData.blocks.length : "N/A",
-          hasSettings: !!plannerData.settings,
-          hasStats: !!plannerData.stats,
-        })
+        if (category === "plannerData") {
+          const plannerData = data as any
+          logger.debug("Data structure check:", {
+            hasBlocks: !!plannerData.blocks,
+            blocksIsArray: Array.isArray(plannerData.blocks),
+            blocksLength: Array.isArray(plannerData.blocks) ? plannerData.blocks.length : "N/A",
+            hasSettings: !!plannerData.settings,
+            hasStats: !!plannerData.stats,
+          })
+        } else if (category === "ganttData") {
+          const ganttData = data as any
+          logger.debug("Data structure check:", {
+            hasProjects: !!ganttData.projects,
+            projectsIsArray: Array.isArray(ganttData.projects),
+            projectsLength: Array.isArray(ganttData.projects) ? ganttData.projects.length : "N/A",
+            hasTasks: !!ganttData.tasks,
+            tasksIsArray: Array.isArray(ganttData.tasks),
+            tasksLength: Array.isArray(ganttData.tasks) ? ganttData.tasks.length : "N/A",
+            hasSections: !!ganttData.sections,
+            sectionsIsArray: Array.isArray(ganttData.sections),
+            sectionsLength: Array.isArray(ganttData.sections) ? ganttData.sections.length : "N/A",
+          })
+        }
       } else {
-        logger.warn("❌ plannerData is null or undefined")
+        logger.warn(`❌ ${category} is null or undefined`)
       }
     }
 
     // Validate the data structure before saving
     const validatedData = validateDataStructure(category, data)
 
-    if (category === "plannerData") {
+    if (category === "plannerData" || category === "ganttData") {
       logger.success("✅ Data validated")
 
       // Compare original and validated data
@@ -586,7 +648,7 @@ export function saveData<T>(category: keyof AppData, data: T): void {
     try {
       setLocalStorage(storageKey, validatedData)
 
-      if (category === "plannerData") {
+      if (category === "plannerData" || category === "ganttData") {
         logger.success("✅ Data saved to localStorage via setLocalStorage")
 
         // Verify the data was actually saved
@@ -601,19 +663,41 @@ export function saveData<T>(category: keyof AppData, data: T): void {
 
               // Check if the saved data has the expected structure
               if (savedData && typeof savedData === "object") {
-                logger.debug("Saved data structure:", {
-                  hasBlocks: !!savedData.blocks,
-                  blocksIsArray: Array.isArray(savedData.blocks),
-                  blocksLength: Array.isArray(savedData.blocks) ? savedData.blocks.length : "N/A",
-                  hasSettings: !!savedData.settings,
-                  hasStats: !!savedData.stats,
-                })
+                if (category === "plannerData") {
+                  logger.debug("Saved data structure:", {
+                    hasBlocks: !!savedData.blocks,
+                    blocksIsArray: Array.isArray(savedData.blocks),
+                    blocksLength: Array.isArray(savedData.blocks) ? savedData.blocks.length : "N/A",
+                    hasSettings: !!savedData.settings,
+                    hasStats: !!savedData.stats,
+                  })
+                } else if (category === "ganttData") {
+                  logger.debug("Saved data structure:", {
+                    hasProjects: !!savedData.projects,
+                    projectsIsArray: Array.isArray(savedData.projects),
+                    projectsLength: Array.isArray(savedData.projects) ? savedData.projects.length : "N/A",
+                    hasTasks: !!savedData.tasks,
+                    tasksIsArray: Array.isArray(savedData.tasks),
+                    tasksLength: Array.isArray(savedData.tasks) ? savedData.tasks.length : "N/A",
+                    hasSections: !!savedData.sections,
+                    sectionsIsArray: Array.isArray(savedData.sections),
+                    sectionsLength: Array.isArray(savedData.sections) ? savedData.sections.length : "N/A",
+                  })
+                }
               }
             } catch (parseError) {
               logger.error("❌ Saved data cannot be parsed as JSON:", parseError)
             }
           } else {
             logger.error("❌ Failed to verify data was saved - not found in localStorage after save")
+
+            // Try direct localStorage save as fallback
+            try {
+              window.localStorage.setItem(storageKey, JSON.stringify(validatedData))
+              logger.success("✅ Saved data using direct localStorage access as fallback")
+            } catch (directSaveError) {
+              logger.error("❌ Direct localStorage save also failed:", directSaveError)
+            }
           }
         }
       }
@@ -622,7 +706,7 @@ export function saveData<T>(category: keyof AppData, data: T): void {
       eventBus.publish(`data:${category}:updated`, validatedData)
       eventBus.publish("data:updated", { collection: category })
 
-      if (category === "plannerData") {
+      if (category === "plannerData" || category === "ganttData") {
         logger.info("📢 Published data update events")
       }
     } catch (storageError) {
@@ -633,7 +717,7 @@ export function saveData<T>(category: keyof AppData, data: T): void {
       try {
         setLocalStorage(storageKey, validatedData, true) // Force immediate save
 
-        if (category === "plannerData") {
+        if (category === "plannerData" || category === "ganttData") {
           logger.success("✅ Data saved after storage optimization")
         }
 
@@ -641,21 +725,37 @@ export function saveData<T>(category: keyof AppData, data: T): void {
         eventBus.publish(`data:${category}:updated`, validatedData)
         eventBus.publish("data:updated", { collection: category })
 
-        if (category === "plannerData") {
+        if (category === "plannerData" || category === "ganttData") {
           logger.info("📢 Published data update events after retry")
         }
       } catch (retryError) {
         logger.error(`❌ Failed to save data for ${category} even after optimization:`, retryError)
-        throw retryError // Re-throw for the outer catch
+
+        // Last resort: try direct localStorage access
+        if (typeof window !== "undefined") {
+          try {
+            window.localStorage.setItem(storageKey, JSON.stringify(validatedData))
+            logger.success(`✅ Saved ${category} data using direct localStorage access as last resort`)
+
+            // Still emit events
+            eventBus.publish(`data:${category}:updated`, validatedData)
+            eventBus.publish("data:updated", { collection: category })
+          } catch (directSaveError) {
+            logger.error(`❌ All attempts to save ${category} data failed:`, directSaveError)
+            throw directSaveError // Re-throw for the outer catch
+          }
+        } else {
+          throw retryError // Re-throw for the outer catch
+        }
       }
     }
 
-    if (category === "plannerData") {
+    if (category === "plannerData" || category === "ganttData") {
       logger.groupEnd()
     }
   } catch (error) {
     logger.error(`❌ Error saving data for ${category}:`, error)
-    if (category === "plannerData") {
+    if (category === "plannerData" || category === "ganttData") {
       logger.groupEnd()
     }
   }

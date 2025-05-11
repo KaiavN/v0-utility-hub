@@ -1,24 +1,36 @@
 "use client"
 
-import { DialogTrigger } from "@/components/ui/dialog"
+import { DialogFooter } from "@/components/ui/dialog"
+
+import { DialogTitle } from "@/components/ui/dialog"
+
+import { DialogHeader } from "@/components/ui/dialog"
+
+import { DialogContent } from "@/components/ui/dialog"
+
+import { Dialog, DialogTrigger } from "@/components/ui/dialog"
+
+import { Badge } from "@/components/ui/badge"
 
 import { CardTitle } from "@/components/ui/card"
 import type React from "react"
-import { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { v4 as uuidv4 } from "uuid"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Card, CardContent, CardHeader, CardDescription, CardFooter } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useToast } from "@/components/ui/use-toast"
 import {
   Search,
   Plus,
   X,
   BookOpen,
-  FolderOpenDot,
   List,
-  Info,
   Filter,
-  Check,
   Star,
-  Download,
-  Upload,
   Settings,
   FileText,
   Folder,
@@ -40,31 +52,10 @@ import {
   Calendar,
   Globe,
   User,
+  ImageIcon,
+  FolderPlus,
+  Tag,
 } from "lucide-react"
-import { useToast } from "@/components/ui/use-toast"
-import { getLocalStorage, setLocalStorage } from "@/lib/local-storage"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Badge } from "@/components/ui/badge"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
 import {
   Select,
   SelectContent,
@@ -74,14 +65,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
-import { cn } from "@/lib/utils"
 import { generateFlashcards } from "@/app/actions/generate-flashcards"
-import { useRouter } from "next/navigation"
+import { getLocalStorage, setLocalStorage } from "@/lib/local-storage"
+import { FeatureIntroduction } from "@/components/onboarding/feature-introduction"
+
+type KnowledgeBasePageProps = {}
 
 interface KnowledgeItem {
   id: string
@@ -93,7 +83,6 @@ interface KnowledgeItem {
   updatedAt: string
   favorite: boolean
   archived: boolean
-  relatedItems?: string[] // IDs of related items
 }
 
 interface TagItem {
@@ -332,7 +321,7 @@ const MarkdownToolbar = ({ onAction }: { onAction: (action: string, value?: stri
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onAction("image")}>
-              <Image className="h-4 w-4" />
+              <ImageIcon className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Image</TooltipContent>
@@ -435,14 +424,21 @@ const RelatedItems = ({
   )
 }
 
+// Helper function to get data from local storage
+
+// Helper function to set data in local storage
+
 const KnowledgeBasePage = () => {
+  const [notes, setNotes] = useState<any[]>([])
+  const [searchQuery, setSearchQuery] = useState("")
+  const [activeTab, setActiveTab] = useState("all")
   const { toast } = useToast()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([])
   const [tags, setTags] = useState<TagItem[]>([])
   const [categories, setCategories] = useState<CategoryItem[]>([])
-  const [searchQuery, setSearchQuery] = useState("")
   const [activeFilters, setActiveFilters] = useState<{
     tags: string[]
     categories: string[]
@@ -465,7 +461,6 @@ const KnowledgeBasePage = () => {
   const [newCategory, setNewCategory] = useState<Partial<CategoryItem>>({ name: "", icon: "Folder" })
   const [newTagInput, setNewTagInput] = useState("")
   const [createNewOpen, setCreateNewOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState("notes")
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const [userSettings, setUserSettings] = useState({
@@ -476,8 +471,10 @@ const KnowledgeBasePage = () => {
     defaultView: "grid",
   })
   const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const title = currentItem?.title || "Knowledge Base"
 
   // Load saved data on mount
   useEffect(() => {
@@ -516,6 +513,25 @@ const KnowledgeBasePage = () => {
 
     setIsLoading(false)
   }, [])
+
+  useEffect(() => {
+    // Load notes from localStorage
+    const savedNotes = getLocalStorage<any[]>("knowledge-base-notes", [])
+    setNotes(savedNotes)
+  }, [])
+
+  const filteredNotes = notes.filter((note) => {
+    const matchesSearch =
+      note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      note.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (note.tags && note.tags.some((tag: string) => tag.toLowerCase().includes(searchQuery.toLowerCase())))
+
+    if (activeTab === "all") return matchesSearch
+    if (activeTab === "recent") return matchesSearch && note.lastUpdated > Date.now() - 7 * 24 * 60 * 60 * 1000
+    if (activeTab === "favorites") return matchesSearch && note.isFavorite
+
+    return matchesSearch
+  })
 
   // Save data when it changes
   useEffect(() => {
@@ -583,7 +599,7 @@ const KnowledgeBasePage = () => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = "knowledge-base-export.json"
+    a.download = `${title.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.md`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -620,7 +636,6 @@ const KnowledgeBasePage = () => {
   }
 
   // Handle selection changes
-
   const onSelectItem = (id: string) => {
     const item = knowledgeItems.find((item) => item.id === id)
     if (item) setCurrentItem(item)
@@ -641,19 +656,18 @@ const KnowledgeBasePage = () => {
     if (!newCategory.name) {
       toast({
         title: "Category name required",
-        description: "Please add a category name.",
+        description: "Please provide a name for the category.",
         variant: "destructive",
       })
       return
     }
 
-    const newCategoryItem: CategoryItem = {
+    const category: CategoryItem = {
+      ...newCategory,
       id: uuidv4(),
-      name: newCategory.name,
-      icon: newCategory.icon || "Folder",
     }
 
-    setCategories([...categories, newCategoryItem])
+    setCategories([...categories, category])
     setNewCategory({ name: "", icon: "Folder" })
     setCategoryDialogOpen(false)
   }
@@ -831,6 +845,21 @@ const KnowledgeBasePage = () => {
     })
   }
 
+  // Handle deleting a note
+  const handleDeleteNote = () => {
+    if (!currentItem) return
+
+    setKnowledgeItems(knowledgeItems.filter((item) => item.id !== currentItem.id))
+    setCurrentItem(null)
+    setDeleteConfirmOpen(false)
+    setActiveTab("notes")
+
+    toast({
+      title: "Note deleted",
+      description: "Your note has been permanently deleted.",
+    })
+  }
+
   const renderItemCard = (item: KnowledgeItem) => (
     <Card
       key={item.id}
@@ -950,597 +979,231 @@ const KnowledgeBasePage = () => {
 
   return (
     <div className="container mx-auto p-6">
-      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
+      <div className="mb-4">
+        <FeatureIntroduction
+          featureId="knowledge-base"
+          title="Welcome to Knowledge Base"
+          description="Store and organize your notes, documents, and information in one place. Use tags and folders to keep everything organized and easily searchable."
+          tutorialId="knowledge-base"
+          className="mb-4"
+        />
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <h1 className="text-3xl font-bold">Knowledge Base</h1>
-          <p className="text-muted-foreground">Your personal information repository</p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Dialog open={createNewOpen} onOpenChange={setCreateNewOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                New Note
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create New Note</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Title</label>
-                  <Input
-                    value={editedItem.title || ""}
-                    onChange={(e) => setEditedItem({ ...editedItem, title: e.target.value })}
-                    placeholder="Note title"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Category</label>
-                  <Select
-                    value={editedItem.category || "General"}
-                    onValueChange={(value) => setEditedItem({ ...editedItem, category: value })}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select a category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectLabel>Categories</SelectLabel>
-                        {categories.map((category) => (
-                          <SelectItem key={category.id} value={category.name}>
-                            <div className="flex items-center gap-2">
-                              {category.icon && getIconByName(category.icon)}
-                              {category.name}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Content</label>
-                  <Textarea
-                    value={editedItem.content || ""}
-                    onChange={(e) => setEditedItem({ ...editedItem, content: e.target.value })}
-                    placeholder="Start writing your note here..."
-                    className="h-[200px] resize-none"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Tags</label>
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {(editedItem.tags || []).map((tag) => (
-                      <Badge
-                        key={tag}
-                        className={`cursor-pointer ${getTagClass(tag)}`}
-                        onClick={() => handleRemoveTag(tag)}
-                      >
-                        {tag}
-                        <X className="ml-1 h-3 w-3" />
-                      </Badge>
-                    ))}
+          <div className="flex gap-2">
+            <Dialog open={createNewOpen} onOpenChange={setCreateNewOpen}>
+              <DialogTrigger asChild>
+                <Button className="add-note-button">
+                  <Plus className="mr-2 h-4 w-4" />
+                  New Note
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create New Note</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Title</label>
+                    <Input
+                      value={editedItem.title || ""}
+                      onChange={(e) => setEditedItem({ ...editedItem, title: e.target.value })}
+                      placeholder="Note title"
+                    />
                   </div>
-                  <div className="flex gap-2">
-                    <Select value={newTagInput} onValueChange={setNewTagInput}>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Category</label>
+                    <Select
+                      value={editedItem.category || "General"}
+                      onValueChange={(value) => setEditedItem({ ...editedItem, category: value })}
+                    >
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select a tag" />
+                        <SelectValue placeholder="Select a category" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          <SelectLabel>Tags</SelectLabel>
-                          {tags.map((tag) => (
-                            <SelectItem key={tag.id} value={tag.name}>
-                              <span className="flex items-center gap-2">
-                                <span
-                                  className={`h-2 w-2 rounded-full ${
-                                    TAG_COLORS.find((color) => color.name === tag.color)?.value.split(" ")[0] || ""
-                                  }`}
-                                ></span>
-                                {tag.name}
-                              </span>
+                          <SelectLabel>Categories</SelectLabel>
+                          {categories.map((category) => (
+                            <SelectItem key={category.id} value={category.name}>
+                              <div className="flex items-center gap-2">
+                                {category.icon && getIconByName(category.icon)}
+                                {category.name}
+                              </div>
                             </SelectItem>
                           ))}
                         </SelectGroup>
                       </SelectContent>
                     </Select>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        if (!newTagInput) return
-                        setEditedItem({
-                          ...editedItem,
-                          tags: [...(editedItem.tags || []), newTagInput],
-                        })
-                        setNewTagInput("")
-                      }}
-                    >
-                      Add
-                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Content</label>
+                    <Textarea
+                      value={editedItem.content || ""}
+                      onChange={(e) => setEditedItem({ ...editedItem, content: e.target.value })}
+                      placeholder="Start writing your note here..."
+                      className="h-[200px] resize-none"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Tags</label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {(editedItem.tags || []).map((tag) => (
+                        <Badge
+                          key={tag}
+                          className={`cursor-pointer ${getTagClass(tag)}`}
+                          onClick={() => handleRemoveTag(tag)}
+                        >
+                          {tag}
+                          <X className="ml-1 h-3 w-3" />
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <Select value={newTagInput} onValueChange={setNewTagInput}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select a tag" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectLabel>Tags</SelectLabel>
+                            {tags.map((tag) => (
+                              <SelectItem key={tag.id} value={tag.name}>
+                                <span className="flex items-center gap-2">
+                                  <span
+                                    className={`h-2 w-2 rounded-full ${
+                                      TAG_COLORS.find((color) => color.name === tag.color)?.value.split(" ")[0] || ""
+                                    }`}
+                                  ></span>
+                                  {tag.name}
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          if (!newTagInput) return
+                          setEditedItem({
+                            ...editedItem,
+                            tags: [...(editedItem.tags || []), newTagInput],
+                          })
+                          setNewTagInput("")
+                        }}
+                      >
+                        Add
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setCreateNewOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleCreateNew}>Create</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setCreateNewOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleCreateNew}>Create</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+            <Button variant="outline">
+              <FolderPlus className="mr-2 h-4 w-4" />
+              New Folder
+            </Button>
+          </div>
+        </div>
 
-          <div className="relative w-full md:w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              ref={searchInputRef}
-              type="text"
               placeholder="Search notes..."
-              className="pl-8"
+              className="pl-9 search-input"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon">
-                <Filter className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[200px]">
-              <DropdownMenuItem onClick={handleFavoriteFilter} className="flex items-center justify-between">
-                Favorites only
-                {activeFilters.favorite === true && <Check className="h-4 w-4" />}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleArchivedFilter} className="flex items-center justify-between">
-                Archived
-                {activeFilters.archived === true && <Check className="h-4 w-4" />}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleResetFilters}>Reset all filters</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button variant="outline" className="sm:w-auto w-full">
+            <Filter className="mr-2 h-4 w-4" />
+            Filters
+          </Button>
+          <Button variant="outline" className="sm:w-auto w-full">
+            <Tag className="mr-2 h-4 w-4" />
+            Tags
+          </Button>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
-        <div className="md:col-span-1">
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Categories</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Accordion type="multiple" defaultValue={["categories", "tags"]}>
-                  <AccordionItem value="categories">
-                    <AccordionTrigger className="px-4 py-2">
-                      <span className="flex items-center text-sm font-medium">
-                        <FolderOpenDot className="mr-2 h-4 w-4" /> Categories
-                        {activeFilters.categories.length > 0 && (
-                          <Badge className="ml-2">{activeFilters.categories.length}</Badge>
-                        )}
-                      </span>
-                    </AccordionTrigger>
-                    <AccordionContent className="pb-2 pt-0">
-                      <div className="space-y-1 px-4">
-                        {categories.map((category) => (
-                          <div key={category.id} className="flex items-center">
-                            <Checkbox
-                              id={`category-${category.id}`}
-                              checked={activeFilters.categories.includes(category.name)}
-                              onCheckedChange={() => handleCategoryFilter(category.name)}
-                            />
-                            <label
-                              htmlFor={`category-${category.id}`}
-                              className="ml-2 cursor-pointer text-sm flex items-center"
-                            >
-                              {category.icon && getIconByName(category.icon)}
-                              {category.name}
-                            </label>
-                          </div>
-                        ))}
-
-                        <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
-                          <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm" className="mt-2 w-full justify-start px-2 text-xs">
-                              <Plus className="mr-2 h-3 w-3" /> Add Category
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Create New Category</DialogTitle>
-                              <DialogDescription>Add a new category to organize your notes</DialogDescription>
-                            </DialogHeader>
-
-                            <div className="space-y-4 py-4">
-                              <div className="space-y-2">
-                                <label className="text-sm font-medium">Category Name</label>
-                                <Input
-                                  value={newCategory.name || ""}
-                                  onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
-                                  placeholder="e.g., Meetings, Exercise"
-                                />
-                              </div>
-
-                              <div className="space-y-2">
-                                <label className="text-sm font-medium">Category Icon</label>
-                                <div className="grid grid-cols-6 gap-2">
-                                  {[
-                                    "FileText",
-                                    "Briefcase",
-                                    "User",
-                                    "BookOpen",
-                                    "Lightbulb",
-                                    "Layers",
-                                    "Folder",
-                                    "Calendar",
-                                    "Globe",
-                                    "Heart",
-                                    "Home",
-                                    "Coffee",
-                                    "Settings",
-                                  ].map((icon) => (
-                                    <div
-                                      key={icon}
-                                      className={cn(
-                                        "h-8 w-8 rounded-full cursor-pointer border-2 border-transparent flex items-center justify-center",
-                                        newCategory.icon === icon && "border-primary",
-                                      )}
-                                      onClick={() => setNewCategory({ ...newCategory, icon: icon })}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter" || e.key === " ") {
-                                          e.preventDefault()
-                                          setNewCategory({ ...newCategory, icon: icon })
-                                        }
-                                      }}
-                                    >
-                                      {getIconByName(icon)}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-
-                            <DialogFooter>
-                              <Button variant="outline" onClick={() => setCategoryDialogOpen(false)}>
-                                Cancel
-                              </Button>
-                              <Button onClick={handleCreateCategory}>Create</Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
+        <Tabs defaultValue="all" className="w-full" onValueChange={setActiveTab}>
+          <TabsList className="w-full justify-start">
+            <TabsTrigger value="all">All Notes</TabsTrigger>
+            <TabsTrigger value="recent">Recent</TabsTrigger>
+            <TabsTrigger value="favorites">Favorites</TabsTrigger>
+          </TabsList>
+          <TabsContent value="all" className="mt-4">
+            {filteredNotes.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredNotes.map((note, index) => (
+                  <Card key={index}>
+                    <CardHeader className="pb-2">
+                      <CardTitle>{note.title}</CardTitle>
+                      <CardDescription>{new Date(note.lastUpdated).toLocaleDateString()}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="pb-2">
+                      <p className="text-sm line-clamp-3">{note.content}</p>
+                    </CardContent>
+                    <CardFooter>
+                      <div className="flex flex-wrap gap-1">
+                        {note.tags &&
+                          note.tags.map((tag: string, tagIndex: number) => (
+                            <span key={tagIndex} className="px-2 py-1 bg-primary/10 text-primary rounded-md text-xs">
+                              {tag}
+                            </span>
+                          ))}
                       </div>
-                    </AccordionContent>
-                  </AccordionItem>
-
-                  <div className="flex items-center justify-between border-t p-4">
-                    <span className="text-sm text-muted-foreground">
-                      {sortedItems.length} items {activeFilters.archived ? "(archived)" : ""}
-                    </span>
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm">
-                          <Info className="mr-2 h-4 w-4" />
-                          Actions
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-[200px]">
-                        <DropdownMenuItem onClick={exportData}>
-                          <Download className="mr-2 h-4 w-4" />
-                          Export data
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="relative">
-                          <Upload className="mr-2 h-4 w-4" />
-                          Import data
-                          <input
-                            type="file"
-                            className="absolute inset-0 opacity-0 cursor-pointer"
-                            accept=".json"
-                            onChange={handleImport}
-                          />
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </Accordion>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        <div className="md:col-span-2 lg:col-span-3">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full">
-            <TabsList className="mb-4">
-              <TabsTrigger value="notes" className="flex items-center gap-1">
-                <FileText className="h-4 w-4" />
-                <span>Notes</span>
-              </TabsTrigger>
-              <TabsTrigger value="detail" className="flex items-center gap-1">
-                <BookOpen className="h-4 w-4" />
-                <span>Detail View</span>
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="notes" className="h-[calc(100vh-250px)] lg:h-auto">
-              {isLoading ? (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {Array(6)
-                    .fill(0)
-                    .map((_, i) => (
-                      <Card key={i}>
-                        <CardHeader>
-                          <Skeleton className="h-6 w-3/4" />
-                        </CardHeader>
-                        <CardContent>
-                          <Skeleton className="mb-2 h-4 w-full" />
-                          <Skeleton className="mb-2 h-4 w-5/6" />
-                          <Skeleton className="h-4 w-4/6" />
-                        </CardContent>
-                      </Card>
-                    ))}
-                </div>
-              ) : sortedItems.length === 0 ? (
-                <Card className="flex h-[calc(100vh-250px)] flex-col items-center justify-center p-6 text-center">
-                  <BookOpen className="mb-4 h-12 w-12 text-muted-foreground" />
-                  <h3 className="text-lg font-medium">No notes found</h3>
-                  <p className="mb-6 text-muted-foreground">
-                    Create your first note or adjust your filters to see more items
-                  </p>
-                  <Button onClick={() => setCreateNewOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Create New Note
-                  </Button>
-                </Card>
-              ) : (
-                <ScrollArea className="h-[calc(100vh-250px)] lg:h-[calc(100vh-220px)]">
-                  {viewType === "grid" ? (
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                      {sortedItems.map((item) => (
-                        <Card
-                          key={item.id}
-                          className="cursor-pointer transition-colors hover:bg-muted"
-                          onClick={() => onSelectItem(item.id)}
-                          onDoubleClick={() => onSelectItem(item.id)}
-                        >
-                          <CardHeader>
-                            <CardTitle>{item.title}</CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <p className="text-sm text-muted-foreground line-clamp-2">{item.content}</p>
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {item.tags.map((tag) => (
-                                <Badge key={tag} className={`text-xs ${getTagClass(tag)}`}>
-                                  {tag}
-                                </Badge>
-                              ))}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {sortedItems.map((item) => (
-                        <Card
-                          key={item.id}
-                          className="cursor-pointer transition-colors hover:bg-muted"
-                          onClick={() => onSelectItem(item.id)}
-                          onDoubleClick={() => onSelectItem(item.id)}
-                        >
-                          <CardContent className="flex items-center justify-between">
-                            <div>
-                              <h4 className="font-medium">{item.title}</h4>
-                              <p className="text-sm text-muted-foreground">{item.content}</p>
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {item.tags.map((tag) => (
-                                  <Badge key={tag} className={`text-xs ${getTagClass(tag)}`}>
-                                    {tag}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                            {item.favorite && <Star className="h-4 w-4 text-yellow-500" />}
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  )}
-                </ScrollArea>
-              )}
-            </TabsContent>
-
-            <TabsContent value="detail" className="h-[calc(100vh-200px)]">
-              <Card className="h-full overflow-hidden">
-                {currentItem ? (
-                  <ScrollArea className="h-full">
-                    {isEditMode ? (
-                      // Edit mode
-                      <CardContent className="p-4">
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Title</label>
-                            <Input
-                              value={editedItem.title || ""}
-                              onChange={(e) => setEditedItem({ ...editedItem, title: e.target.value })}
-                              placeholder="Note title"
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Category</label>
-                            <Select
-                              value={editedItem.category || currentItem.category}
-                              onValueChange={(value) => setEditedItem({ ...editedItem, category: value })}
-                            >
-                              <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Select a category" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectGroup>
-                                  <SelectLabel>Categories</SelectLabel>
-                                  {categories.map((category) => (
-                                    <SelectItem key={category.id} value={category.name}>
-                                      <div className="flex items-center gap-2">
-                                        {category.icon && getIconByName(category.icon)}
-                                        {category.name}
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Content</label>
-                            <Textarea
-                              value={editedItem.content || ""}
-                              onChange={(e) => setEditedItem({ ...editedItem, content: e.target.value })}
-                              placeholder="Start writing your note here..."
-                              className="h-[200px] resize-none"
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Tags</label>
-                            <div className="flex flex-wrap gap-2 mb-2">
-                              {(editedItem.tags || []).map((tag) => (
-                                <Badge
-                                  key={tag}
-                                  className={`cursor-pointer ${getTagClass(tag)}`}
-                                  onClick={() => handleRemoveTag(tag)}
-                                >
-                                  {tag}
-                                  <X className="ml-1 h-3 w-3" />
-                                </Badge>
-                              ))}
-                            </div>
-                            <div className="flex gap-2">
-                              <Select value={newTagInput} onValueChange={setNewTagInput}>
-                                <SelectTrigger className="w-full">
-                                  <SelectValue placeholder="Select a tag" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectGroup>
-                                    <SelectLabel>Tags</SelectLabel>
-                                    {tags.map((tag) => (
-                                      <SelectItem key={tag.id} value={tag.name}>
-                                        <span className="flex items-center gap-2">
-                                          <span
-                                            className={`h-2 w-2 rounded-full ${
-                                              TAG_COLORS.find((color) => color.name === tag.color)?.value.split(
-                                                " ",
-                                              )[0] || ""
-                                            }`}
-                                          ></span>
-                                          {tag.name}
-                                        </span>
-                                      </SelectItem>
-                                    ))}
-                                  </SelectGroup>
-                                </SelectContent>
-                              </Select>
-                              <Button variant="outline" onClick={handleAddTag}>
-                                Add
-                              </Button>
-                            </div>
-                          </div>
-
-                          <div className="flex justify-end gap-2 mt-4">
-                            <Button variant="outline" onClick={handleCancelEdit}>
-                              Cancel
-                            </Button>
-                            <Button onClick={handleSaveEdit}>Save Changes</Button>
-                          </div>
-                        </div>
-                      </CardContent>
-                    ) : (
-                      // View mode
-                      <>
-                        <CardHeader className="flex flex-row items-center justify-between">
-                          <div>
-                            <CardTitle>{currentItem.title}</CardTitle>
-                            <p className="text-sm text-muted-foreground">
-                              Created at {new Date(currentItem.createdAt).toLocaleDateString()} | Last updated at{" "}
-                              {new Date(currentItem.updatedAt).toLocaleDateString()}
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button variant="outline" size="sm" onClick={() => handleEditItem()}>
-                              Edit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                const updatedItem = { ...currentItem, favorite: !currentItem.favorite }
-                                setKnowledgeItems(
-                                  knowledgeItems.map((item) => (item.id === updatedItem.id ? updatedItem : item)),
-                                )
-                                setCurrentItem(updatedItem)
-                              }}
-                            >
-                              {currentItem.favorite ? (
-                                <>
-                                  <Star className="mr-1 h-4 w-4 fill-yellow-400 text-yellow-400" /> Favorited
-                                </>
-                              ) : (
-                                <>
-                                  <Star className="mr-1 h-4 w-4" /> Favorite
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <p>{currentItem.content}</p>
-                          {currentItem.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {currentItem.tags.map((tag) => (
-                                <Badge key={tag} className={`text-xs ${getTagClass(tag)}`}>
-                                  {tag}
-                                </Badge>
-                              ))}
-                            </div>
-                          )}
-                          <Separator />
-                          <div>
-                            <h4 className="text-sm font-medium">Related Notes</h4>
-                            <RelatedItems
-                              currentItem={currentItem}
-                              allItems={knowledgeItems}
-                              tags={tags}
-                              onSelectItem={onSelectItem}
-                            />
-                          </div>
-                          <Button onClick={handleCreateFlashcardsFromNote} disabled={isGeneratingFlashcards}>
-                            {isGeneratingFlashcards ? "Generating Flashcards..." : "Generate Flashcards"}
-                          </Button>
-                        </CardContent>
-                      </>
-                    )}
-                  </ScrollArea>
-                ) : (
-                  <div className="flex h-full items-center justify-center p-6 text-center">
-                    <div className="space-y-2">
-                      <BookOpen className="mx-auto h-12 w-12 text-muted-foreground" />
-                      <h3 className="text-lg font-medium">No item selected</h3>
-                      <p className="text-muted-foreground">Select an item to view details</p>
-                    </div>
-                  </div>
-                )}
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </div>
+                    </CardFooter>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground mb-4">No notes found</p>
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create your first note
+                </Button>
+              </div>
+            )}
+          </TabsContent>
+          <TabsContent value="recent" className="mt-4">
+            {/* Recent notes content */}
+            {filteredNotes.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Note cards would go here */}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground">No recent notes found</p>
+              </div>
+            )}
+          </TabsContent>
+          <TabsContent value="favorites" className="mt-4">
+            {/* Favorites content */}
+            {filteredNotes.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Note cards would go here */}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground">No favorite notes found</p>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   )

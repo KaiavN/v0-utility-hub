@@ -17,6 +17,88 @@ import { formatDistanceToNow } from "date-fns"
 import { cn } from "@/lib/utils"
 import ReactMarkdown from "react-markdown"
 
+// Add a function to analyze message content and extract topics
+function extractTopicsFromMessage(content: string): string[] {
+  // Basic topic extraction based on keywords
+  const topicKeywords: Record<string, string[]> = {
+    task: ["task", "to-do", "todo", "todos", "to-dos", "reminder", "remind me", "schedule"],
+    calendar: ["calendar", "event", "schedule", "appointment", "meeting", "date", "time"],
+    note: ["note", "notes", "write down", "remember", "save this", "information"],
+    project: ["project", "plan", "planning", "timeline", "milestone", "deadline"],
+    finance: ["expense", "budget", "money", "finance", "payment", "invoice", "bill"],
+    knowledge: ["information", "research", "study", "learn", "knowledge"],
+    personal: ["personal", "private", "me", "my", "I need", "I want"],
+    work: ["work", "job", "business", "professional", "client"],
+    health: ["health", "exercise", "workout", "fitness", "diet", "nutrition"],
+  }
+
+  const foundTopics: string[] = []
+
+  // Check for each topic by testing for its keywords
+  Object.entries(topicKeywords).forEach(([topic, keywords]) => {
+    for (const keyword of keywords) {
+      if (content.toLowerCase().includes(keyword.toLowerCase())) {
+        foundTopics.push(topic)
+        break // Found this topic, move to next one
+      }
+    }
+  })
+
+  return [...new Set(foundTopics)] // Remove duplicates
+}
+
+// Function to analyze message and update user profile
+function analyzeMessageForUserProfile(content: string, updateUserProfile: Function): void {
+  try {
+    // Extract topics from the message
+    const topics = extractTopicsFromMessage(content)
+
+    if (topics.length > 0) {
+      // Update user profile with new topics
+      updateUserProfile({
+        interactions: {
+          commonTopics: topics, // This will be merged with existing topics in the updateUserProfile function
+        },
+      })
+    }
+
+    // Analyze language style and preferences
+    const prefersFormal = /please|kindly|would you|could you|thank you/i.test(content)
+    const prefersDetailedResponses = content.length > 100 || /detail|explain|elaborate|comprehensive/i.test(content)
+    const prefersQuickResponses = /quick|fast|brief|short|simple/i.test(content)
+
+    // Only update if we have enough confidence
+    if (prefersFormal || prefersDetailedResponses || prefersQuickResponses) {
+      updateUserProfile({
+        preferences: {
+          ...(prefersFormal && { communicationStyle: "formal" }),
+          ...(prefersDetailedResponses && { responseDetail: "detailed" }),
+          ...(prefersQuickResponses && { responseDetail: "brief" }),
+        },
+      })
+    }
+
+    // Analyze for knowledge areas
+    const knowledgePatterns = [
+      { area: "programming", pattern: /code|programming|javascript|python|html|css|typescript|react|node/i },
+      { area: "business", pattern: /business|client|project management|startup|company|enterprise/i },
+      { area: "education", pattern: /study|school|college|university|course|assignment|homework|learn/i },
+      { area: "health", pattern: /health|fitness|workout|diet|nutrition|exercise|medical|wellness/i },
+      { area: "personal productivity", pattern: /productivity|efficient|organize|time management|focus/i },
+    ]
+
+    const detectedAreas = knowledgePatterns.filter(({ pattern }) => pattern.test(content)).map(({ area }) => area)
+
+    if (detectedAreas.length > 0) {
+      updateUserProfile({
+        knowledgeAreas: detectedAreas,
+      })
+    }
+  } catch (error) {
+    console.error("Error analyzing message for user profile:", error)
+  }
+}
+
 export function AIChatWindow() {
   const {
     messages,
@@ -26,6 +108,7 @@ export function AIChatWindow() {
     pendingDataEdit,
     isPendingApproval,
     settings,
+    userProfile,
     sendMessage,
     clearMessages,
     minimizeChat,
@@ -33,11 +116,18 @@ export function AIChatWindow() {
     toggleChat,
     approveDataEdit,
     rejectDataEdit,
+    updateUserProfile,
   } = useAIAssistant()
 
   const [input, setInput] = useState("")
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isHelpOpen, setIsHelpOpen] = useState(false)
+  const [dataOperationStats, setDataOperationStats] = useState({
+    total: 0,
+    successful: 0,
+    failed: 0,
+    lastOperation: null as null | { success: boolean; timestamp: number },
+  })
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [typingIndicator, setTypingIndicator] = useState(false)
@@ -69,9 +159,44 @@ export function AIChatWindow() {
     }
   }, [isSending])
 
+  // Track data operation reliability
+  useEffect(() => {
+    // Monitor data operation reliability through system messages
+    const dataMessages = messages.filter(
+      (m) => m.role === "system" && (m.content.includes("data edit") || m.content.includes("Data edit")),
+    )
+
+    if (dataMessages.length > 0) {
+      const successful = dataMessages.filter(
+        (m) => m.content.includes("successful") || m.content.includes("Success") || m.content.includes("✅"),
+      ).length
+
+      const failed = dataMessages.length - successful
+
+      setDataOperationStats({
+        total: dataMessages.length,
+        successful,
+        failed,
+        lastOperation:
+          dataMessages.length > 0
+            ? {
+                success:
+                  dataMessages[dataMessages.length - 1].content.includes("successful") ||
+                  dataMessages[dataMessages.length - 1].content.includes("Success") ||
+                  dataMessages[dataMessages.length - 1].content.includes("✅"),
+                timestamp: dataMessages[dataMessages.length - 1].timestamp,
+              }
+            : null,
+      })
+    }
+  }, [messages])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (input.trim() && !isSending) {
+      // Analyze the message for user profiling before sending
+      analyzeMessageForUserProfile(input, updateUserProfile)
+
       sendMessage(input)
       setInput("")
     }
@@ -105,7 +230,7 @@ export function AIChatWindow() {
       <Card
         className={cn(
           "fixed bottom-20 right-4 z-50 shadow-xl transition-all duration-300 border-primary/10",
-          isMinimized ? "h-14 w-14 rounded-full" : "h-[600px] max-h-[80vh] w-[380px] md:w-[450px] rounded-2xl",
+          isMinimized ? "h-14 w-14 rounded-full" : "h-[600px] max-h-[80vh] w-[500px] md:w-[550px] rounded-2xl",
         )}
       >
         <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 border-b bg-primary/5">

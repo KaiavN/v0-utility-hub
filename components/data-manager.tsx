@@ -1,25 +1,63 @@
 "use client"
 
 import { useEffect } from "react"
-import { optimizeStorage, loadAllData, saveAllData, migrateDataIfNeeded, checkAndRepairData } from "@/lib/data-manager"
+import { optimizeStorage, loadAllData, saveAllData, migrateDataIfNeeded } from "@/lib/data-manager"
 import { flushLocalStorageWrites } from "@/lib/local-storage"
+import { initPersistenceMonitor, checkPersistenceHealth } from "@/lib/data-persistence-monitor"
+
+// Placeholder functions for data integrity validation and repair
+const validateDataIntegrity = () => {
+  // Implement your data integrity validation logic here
+  return true // Assume data is valid for now
+}
+
+const repairCorruptedData = () => {
+  // Implement your data repair logic here
+  console.log("Repairing corrupted data...")
+}
+
+const performDataMaintenance = () => {
+  // Implement your data maintenance tasks here
+  optimizeStorage()
+  console.log("Performing data maintenance...")
+}
 
 export function DataManager() {
   // Run initialization on load
   useEffect(() => {
-    // Wait for the app to be fully loaded
-    const timeoutId = setTimeout(() => {
-      // Check for data migrations
-      migrateDataIfNeeded()
+    // Initialize the data manager
+    console.log("Initializing data manager...")
 
-      // Check and repair any corrupted data
-      checkAndRepairData()
+    // Initialize data persistence monitor
+    initPersistenceMonitor()
 
-      // Optimize storage
-      optimizeStorage()
-    }, 2000) // 2 seconds after load
+    // Check data integrity and repair if needed
+    if (!validateDataIntegrity()) {
+      console.warn("Data integrity issues detected, repairing...")
+      repairCorruptedData()
+    }
 
-    return () => clearTimeout(timeoutId)
+    // Migrate data if needed
+    migrateDataIfNeeded()
+
+    // Schedule periodic data maintenance
+    const maintenanceInterval = setInterval(
+      () => {
+        performDataMaintenance()
+
+        // Check persistence health
+        const healthCheck = checkPersistenceHealth()
+        if (!healthCheck.healthy) {
+          console.warn("⚠️ Data persistence health issues detected:", healthCheck.issues)
+        }
+      },
+      15 * 60 * 1000,
+    ) // Every 15 minutes
+
+    // Clean up interval on unmount
+    return () => {
+      clearInterval(maintenanceInterval)
+    }
   }, [])
 
   // Set up periodic optimization

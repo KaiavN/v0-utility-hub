@@ -8,6 +8,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
 import { fontSans } from "@/lib/fonts"
 import { Toaster } from "@/components/ui/toaster"
+import { FeatureTutorialButton } from "@/components/feature-tutorial-button"
 
 export const metadata: Metadata = {
   title: "Utility Hub",
@@ -51,7 +52,7 @@ export default function RootLayout({ children }: Props) {
     }, 0)
   }
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning data-theme-color="blue">
       <body className={cn("min-h-screen bg-background font-sans antialiased", fontSans.variable)}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AuthProvider>
@@ -63,6 +64,8 @@ export default function RootLayout({ children }: Props) {
             <Toaster />
           </AuthProvider>
         </ThemeProvider>
+        {/* Feature tutorial button */}
+        <FeatureTutorialButton />
       </body>
     </html>
   )

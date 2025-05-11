@@ -43,6 +43,8 @@ import { SettingsDialog } from "@/components/finance/settings-dialog"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import { LinkedItemsList } from "@/components/linked-items/linked-items-list"
+import { LinkItemDialog } from "@/components/linked-items/link-item-dialog"
 
 // Types
 interface Transaction {
@@ -211,6 +213,11 @@ export default function FinancePage() {
   const [dateFormat, setDateFormat] = useState<string>("MM/DD/YYYY")
   const [chartStyle, setChartStyle] = useState<string>("default")
   const [chartAnimations, setChartAnimations] = useState<boolean>(true)
+
+  // Helper function to get transaction ID for linking
+  const getTransactionLinkId = (transaction: any) => {
+    return transaction?.id || ""
+  }
 
   // Load data from localStorage
   useEffect(() => {
@@ -1391,6 +1398,32 @@ export default function FinancePage() {
                 onChange={(e) => setNewTransaction({ ...newTransaction, description: e.target.value })}
                 placeholder="Enter transaction description"
               />
+            </div>
+            <div className="space-y-2 mt-4 pt-4 border-t">
+              <Label>Linked Items</Label>
+              {editingTransactionId && (
+                <>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-muted-foreground">Link this transaction to related items</span>
+                    <LinkItemDialog
+                      sourceId={editingTransactionId}
+                      sourceType="finance"
+                      onLinkAdded={() => {
+                        // Force refresh
+                        const updatedTransactions = [...transactions]
+                        setTransactions(updatedTransactions)
+                      }}
+                    />
+                  </div>
+                  <LinkedItemsList
+                    sourceId={editingTransactionId}
+                    sourceType="finance"
+                    showEmpty={true}
+                    maxItems={3}
+                    emptyMessage="No items linked yet. Link clients, projects, or other related items."
+                  />
+                </>
+              )}
             </div>
           </div>
           <DialogFooter>

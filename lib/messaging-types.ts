@@ -1,30 +1,36 @@
-// Define the Message type
 export interface Message {
   id: string
-  senderId: string
-  senderName: string
-  recipientId: string
-  recipientName: string
   content: string
-  timestamp: string
+  created_at: string
   read: boolean
+  sender_id: string
+  sender_name: string
+  sender_avatar: string | null
 }
 
-// Define the Conversation type
 export interface Conversation {
   id: string
-  participantId: string
-  participantName: string
-  lastMessage?: string
-  lastMessageTimestamp?: string
-  unreadCount: number
+  title: string | null
+  created_at: string
+  updated_at: string
 }
 
-// Define the MessagingState type
-export interface MessagingState {
-  conversations: Conversation[]
-  activeConversation: string | null
-  messages: Record<string, Message[]>
-  isLoading: boolean
-  error: Error | null
+export interface Profile {
+  id: string
+  display_name: string
+  avatar_url: string | null
+  email: string
+}
+
+export interface ConversationWithParticipants extends Conversation {
+  participants: Profile[]
+}
+
+export interface ConversationSummary {
+  id: string
+  title: string
+  lastMessage: string | null
+  lastMessageTime: string | null
+  unreadCount: number
+  participants: Profile[]
 }

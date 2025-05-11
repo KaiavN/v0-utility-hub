@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/auth-context"
 import { Github } from "lucide-react"
+import { toast } from "@/components/ui/use-toast"
 
 interface GitHubLoginButtonProps {
   className?: string
@@ -18,9 +19,20 @@ export function GitHubLoginButton({ className = "", variant = "default", size = 
   const handleLogin = async () => {
     if (isLoading || isClicked) return
 
-    setIsClicked(true)
-    await loginWithGitHub()
-    // No need to reset isClicked as we'll be redirected to GitHub
+    try {
+      setIsClicked(true)
+      console.log("GitHub login button clicked")
+      await loginWithGitHub()
+      // No need to reset isClicked as we'll be redirected to GitHub
+    } catch (error) {
+      console.error("Error in GitHub login button:", error)
+      toast({
+        title: "Login Failed",
+        description: "Failed to initiate GitHub login. Please try again.",
+        variant: "destructive",
+      })
+      setIsClicked(false)
+    }
   }
 
   return (

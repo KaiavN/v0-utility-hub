@@ -3,6 +3,7 @@ import { validateDataEditOperation } from "./data-editor"
 import { getDataSchema } from "./data-schemas"
 import type { DataSchema } from "./data-schemas"
 import { eventBus } from "./event-bus"
+import { forceSaveAllData, loadAllData } from "./data-manager"
 
 // Define the data edit operation type
 export interface DataEditOperation {
@@ -13,32 +14,232 @@ export interface DataEditOperation {
   data?: any
 }
 
-// Process a single data edit operation
+// Add a more comprehensive data validation function
+function validateDataContent(data: any, collection: string): { valid: boolean; message?: string } {
+  try {
+    // Skip validation for null or undefined data
+    if (data === null || data === undefined) {
+      return { valid: true }
+    }
+
+    // Ensure it's an object
+    if (typeof data !== "object" || Array.isArray(data)) {
+      return {
+        valid: false,
+        message: `Data must be an object, got ${Array.isArray(data) ? "array" : typeof data}`,
+      }
+    }
+
+    // Collection-specific validation
+    switch (collection) {
+      case "tasks":
+        if (!data.title) {
+          return { valid: false, message: "Task must have a title" }
+        }
+
+        // Validate date format if provided
+        if (data.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(data.dueDate)) {
+          return { valid: false, message: "Due date must be in YYYY-MM-DD format" }
+        }
+
+        // Validate priority if provided
+        if (data.priority && !["low", "medium", "high"].includes(data.priority)) {
+          return { valid: false, message: "Priority must be low, medium, or high" }
+        }
+
+        break
+
+      case "plannerData":
+        // If it's a blocks array, validate each block
+        if (Array.isArray(data.blocks)) {
+          for (let i = 0; i < data.blocks.length; i++) {
+            const block = data.blocks[i]
+            if (!block.title) {
+              return { valid: false, message: `Block at index ${i} must have a title` }
+            }
+            if (!block.date) {
+              return { valid: false, message: `Block at index ${i} must have a date` }
+            }
+            if (block.date && !/^\d{4}-\d{2}-\d{2}$/.test(block.date)) {
+              return { valid: false, message: `Block at index ${i} date must be in YYYY-MM-DD format` }
+            }
+            if (block.startTime && !/^([01]\d|2[0-3]):([0-5]\d)$/.test(block.startTime)) {
+              return { valid: false, message: `Block at index ${i} startTime must be in HH:MM format` }
+            }
+            if (block.endTime && !/^([01]\d|2[0-3]):([0-5]\d)$/.test(block.endTime)) {
+              return { valid: false, message: `Block at index ${i} endTime must be in HH:MM format` }
+            }
+          }
+        }
+        break
+
+      case "notes":
+        if (!data.title) {
+          return { valid: false, message: "Note must have a title" }
+        }
+        if (!data.content) {
+          return { valid: false, message: "Note must have content" }
+        }
+        break
+
+      case "knowledgeItems":
+        if (!data.title) {
+          return { valid: false, message: "Knowledge item must have a title" }
+        }
+        if (!data.content) {
+          return { valid: false, message: "Knowledge item must have content" }
+        }
+        break
+
+      case "ganttData":
+        // Additional validation for projects
+        if (data.projects) {
+          if (!Array.isArray(data.projects)) {
+            return { valid: false, message: "Projects must be an array" }
+          }
+
+          for (let i = 0; i < data.projects.length; i++) {
+            const project = data.projects[i]
+            if (!project.name) {
+              return { valid: false, message: `Project at index ${i} must have a name` }
+            }
+
+            // Validate dates if provided
+            try {
+              if (project.start) new Date(project.start)
+              if (project.end) new Date(project.end)
+            } catch {
+              return { valid: false, message: `Project at index ${i} has invalid date formats` }
+            }
+          }
+        }
+
+        // Validate tasks
+        if (data.tasks) {
+          if (!Array.isArray(data.tasks)) {
+            return { valid: false, message: "Tasks must be an array" }
+          }
+
+          for (let i = 0; i < data.tasks.length; i++) {
+            const task = data.tasks[i]
+            if (!task.name) {
+              return { valid: false, message: `Task at index ${i} must have a name` }
+            }
+            if (!task.projectId) {
+              return { valid: false, message: `Task at index ${i} must have a projectId` }
+            }
+
+            // Validate dates
+            try {
+              if (task.start) new Date(task.start)
+              if (task.end) new Date(task.end)
+            } catch {
+              return { valid: false, message: `Task at index ${i} has invalid date formats` }
+            }
+          }
+        }
+        break
+
+      // Add more collection-specific validations as needed
+    }
+
+    return { valid: true }
+  } catch (error) {
+    console.error("Error validating data content:", error)
+    return {
+      valid: false,
+      message: `Validation error: ${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
+}
+
+// Process a single data edit operation with improved error handling and validation
 export async function processDataEditOperation(
   operation: DataEditOperation,
 ): Promise<{ success: boolean; message: string; data?: any }> {
   try {
-    // Validate the operation
+    console.log(`Processing data edit operation: ${operation.type} on ${operation.collection}`, operation)
+
+    // First validate the operation structure
     const validation = validateDataEditOperation(operation)
     if (!validation.valid) {
+      console.error(`Invalid data edit operation: ${validation.message}`, operation)
       return {
         success: false,
         message: validation.message || "Invalid data edit operation",
       }
     }
 
-    // Perform the operation
-    const result = await performDataEdit(operation)
+    // Then validate the data content if it's an add or update operation
+    if ((operation.type === "add" || operation.type === "update") && operation.data) {
+      const contentValidation = validateDataContent(operation.data, operation.collection)
+      if (!contentValidation.valid) {
+        console.error(`Invalid data content: ${contentValidation.message}`, operation.data)
+        return {
+          success: false,
+          message: contentValidation.message || "Invalid data content",
+        }
+      }
+    }
 
-    // Emit an event for the operation
-    eventBus.publish(`data:${operation.collection}:operation`, {
-      type: operation.type,
-      result,
-    })
+    // Perform the operation with additional safety checks
+    try {
+      const result = await performDataEdit(operation)
 
-    return result
+      if (result.success) {
+        console.log(`Data edit operation successful: ${operation.type} on ${operation.collection}`)
+
+        // Force an immediate save to ensure data persistence
+        try {
+          const allData = loadAllData()
+          forceSaveAllData(allData)
+          console.log("Forced immediate save of all data after successful edit operation")
+
+          // Double-check that the data was saved correctly
+          setTimeout(() => {
+            try {
+              const verificationData = loadAllData()
+              const verificationResult = verificationData[operation.collection as keyof typeof verificationData]
+              if (!verificationResult) {
+                console.warn(`Verification check: ${operation.collection} not found in saved data`)
+              } else {
+                console.log(`Verification check: ${operation.collection} found in saved data`)
+              }
+            } catch (verifyError) {
+              console.error("Error during verification check:", verifyError)
+            }
+          }, 500)
+        } catch (saveError) {
+          console.error("Error forcing data save after edit operation:", saveError)
+          // Continue anyway since the operation itself was successful
+        }
+      } else {
+        console.error(`Data edit operation failed: ${result.message}`, operation)
+      }
+
+      // Emit events for the operation
+      eventBus.publish(`data:${operation.collection}:operation`, {
+        type: operation.type,
+        result,
+      })
+
+      // Also emit a general data updated event
+      eventBus.publish("data:updated", {
+        collection: operation.collection,
+        type: operation.type,
+        success: result.success,
+      })
+
+      return result
+    } catch (operationError) {
+      console.error("Error during data edit operation:", operationError)
+      return {
+        success: false,
+        message: `Operation error: ${operationError instanceof Error ? operationError.message : String(operationError)}`,
+      }
+    }
   } catch (error) {
-    console.error("Error processing data edit operation:", error)
+    console.error("Error processing data edit operation:", error, operation)
     return {
       success: false,
       message: `Error: ${error instanceof Error ? error.message : String(error)}`,
@@ -46,13 +247,138 @@ export async function processDataEditOperation(
   }
 }
 
-// Process multiple data edit operations
+// Add a function to safely process operations with retry logic
+export async function safeProcessOperation(
+  operation: DataEditOperation,
+  maxRetries = 2,
+): Promise<{ success: boolean; message: string; data?: any }> {
+  let attempts = 0
+  let lastError = null
+
+  while (attempts <= maxRetries) {
+    try {
+      console.log(`Attempt ${attempts + 1} for operation: ${operation.type} on ${operation.collection}`)
+
+      // Process the operation
+      const result = await processDataEditOperation(operation)
+
+      if (result.success) {
+        // If successful, we're done
+        if (attempts > 0) {
+          console.log(`Operation succeeded after ${attempts + 1} attempts`)
+        }
+        return result
+      } else {
+        // If failed but retriable, try again
+        lastError = result.message
+        console.warn(`Attempt ${attempts + 1} failed: ${lastError}`)
+        attempts++
+      }
+    } catch (error) {
+      // If unexpected error, record it and try again
+      lastError = error instanceof Error ? error.message : String(error)
+      console.error(`Unexpected error in attempt ${attempts + 1}: ${lastError}`)
+      attempts++
+    }
+
+    // Add a short delay before retrying to avoid race conditions
+    if (attempts <= maxRetries) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempts)) // Progressive backoff
+    }
+  }
+
+  console.error(`Operation failed after ${attempts} attempts. Last error: ${lastError}`)
+  return {
+    success: false,
+    message: `Failed after ${attempts} attempts. Last error: ${lastError}`,
+  }
+}
+
+// Process multiple data edit operations with improved error handling
 export async function processMultipleDataEditOperations(
   operations: DataEditOperation[],
 ): Promise<{ success: boolean; message: string; data?: any }[]> {
   try {
-    // Process each operation
-    const results = await Promise.all(operations.map((operation) => processDataEditOperation(operation)))
+    console.log(`Processing ${operations.length} data edit operations`)
+
+    // Validate all operations first
+    const invalidOperations = operations
+      .map((op, index) => {
+        const validation = validateDataEditOperation(op)
+        if (!validation.valid) {
+          return { index, message: validation.message || "Invalid operation" }
+        }
+
+        // Also validate data content for add/update operations
+        if ((op.type === "add" || op.type === "update") && op.data) {
+          const contentValidation = validateDataContent(op.data, op.collection)
+          if (!contentValidation.valid) {
+            return { index, message: contentValidation.message || "Invalid data content" }
+          }
+        }
+
+        return null
+      })
+      .filter(Boolean)
+
+    if (invalidOperations.length > 0) {
+      console.error(`Found ${invalidOperations.length} invalid operations:`, invalidOperations)
+
+      // Return results with failures for invalid operations
+      return operations
+        .map((op, index) => {
+          const invalidOp = invalidOperations.find((io) => io?.index === index)
+          if (invalidOp) {
+            return {
+              success: false,
+              message: `Validation failed: ${invalidOp.message}`,
+            }
+          }
+
+          // For valid operations, we'll process them below
+          return null as any // Placeholder
+        })
+        .filter(Boolean)
+    }
+
+    // Process each operation with retry logic for better reliability
+    const results = await Promise.all(operations.map((operation) => safeProcessOperation(operation)))
+
+    // Force an immediate save to ensure data persistence after all operations
+    try {
+      const allData = loadAllData()
+      forceSaveAllData(allData)
+      console.log("Forced immediate save of all data after multiple edit operations")
+
+      // Verification check after a delay
+      setTimeout(() => {
+        try {
+          // Check that all collections that were modified are still in the saved data
+          const verificationData = loadAllData()
+          const modifiedCollections = [...new Set(operations.map((op) => op.collection))]
+
+          for (const collection of modifiedCollections) {
+            const collectionData = verificationData[collection as keyof typeof verificationData]
+            if (!collectionData) {
+              console.warn(`Verification check: ${collection} not found in saved data`)
+            } else {
+              console.log(`Verification check: ${collection} found in saved data`)
+            }
+          }
+        } catch (verifyError) {
+          console.error("Error during verification check:", verifyError)
+        }
+      }, 500)
+    } catch (saveError) {
+      console.error("Error forcing data save after multiple edit operations:", saveError)
+      // Continue anyway since we already have individual operation results
+    }
+
+    // Log summary of results
+    const successCount = results.filter((r) => r.success).length
+    console.log(
+      `Completed ${operations.length} operations: ${successCount} succeeded, ${operations.length - successCount} failed`,
+    )
 
     return results
   } catch (error) {
@@ -552,259 +878,58 @@ const validatePlannerData = (data: any, collection: string): any => {
 
 // Generate a summary of the data edit operation(s)
 export function generateDataEditSummary(operation: DataEditOperation | DataEditOperation[]): string {
-  try {
-    if (Array.isArray(operation)) {
-      // Multiple operations
-      const addCount = operation.filter((op) => op.type === "add").length
-      const updateCount = operation.filter((op) => op.type === "update").length
-      const deleteCount = operation.filter((op) => op.type === "delete").length
+  if (Array.isArray(operation)) {
+    const counts = operation.reduce(
+      (acc, op) => {
+        acc[op.type]++
+        return acc
+      },
+      { add: 0, update: 0, delete: 0 },
+    )
 
-      const collections = [...new Set(operation.map((op) => op.collection))]
-      const collectionNames = collections.map((c) => formatCollectionName(c)).join(", ")
+    const parts = []
+    if (counts.add > 0) parts.push(`add ${counts.add} item${counts.add > 1 ? "s" : ""}`)
+    if (counts.update > 0) parts.push(`update ${counts.update} item${counts.update > 1 ? "s" : ""}`)
+    if (counts.delete > 0) parts.push(`delete ${counts.delete} item${counts.delete > 1 ? "s" : ""}`)
 
-      let summary = `The AI assistant wants to make ${operation.length} changes to your data:`
+    return `The AI assistant wants to ${parts.join(", ")}.`
+  }
 
-      if (addCount > 0) {
-        summary += ` add ${addCount} item${addCount > 1 ? "s" : ""}`
-      }
+  const collectionName = operation.collection
+    .replace(/([A-Z])/g, " $1")
+    .trim()
+    .toLowerCase()
 
-      if (updateCount > 0) {
-        summary += `${addCount > 0 ? "," : ""} update ${updateCount} item${updateCount > 1 ? "s" : ""}`
-      }
-
-      if (deleteCount > 0) {
-        summary += `${addCount > 0 || updateCount > 0 ? "," : ""} delete ${deleteCount} item${deleteCount > 1 ? "s" : ""}`
-      }
-
-      summary += ` in ${collections.length > 1 ? "these collections" : "this collection"}: ${collectionNames}.`
-
-      return summary
-    } else {
-      // Single operation
-      const { type, collection, id, query, data } = operation
-      const collectionName = formatCollectionName(collection)
-
-      switch (type) {
-        case "add":
-          return `The AI assistant wants to add a new ${collectionName.toLowerCase()} to your data.`
-
-        case "update":
-          if (id) {
-            return `The AI assistant wants to update an existing ${collectionName.toLowerCase()} (ID: ${id}).`
-          } else if (query) {
-            const queryStr = Object.entries(query)
-              .map(([key, value]) => `${key}: ${typeof value === "string" ? `"${value}"` : value}`)
-              .join(", ")
-            return `The AI assistant wants to update ${collectionName.toLowerCase()} matching these criteria: ${queryStr}.`
-          }
-          return `The AI assistant wants to update a ${collectionName.toLowerCase()}.`
-
-        case "delete":
-          if (id) {
-            return `The AI assistant wants to delete a ${collectionName.toLowerCase()} (ID: ${id}).`
-          } else if (query) {
-            const queryStr = Object.entries(query)
-              .map(([key, value]) => `${key}: ${typeof value === "string" ? `"${value}"` : value}`)
-              .join(", ")
-            return `The AI assistant wants to delete ${collectionName.toLowerCase()} matching these criteria: ${queryStr}.`
-          }
-          return `The AI assistant wants to delete a ${collectionName.toLowerCase()}.`
-
-        default:
-          return `The AI assistant wants to perform an unknown operation on your ${collectionName.toLowerCase()} data.`
-      }
-    }
-  } catch (error) {
-    console.error("Error generating data edit summary:", error)
-    return "The AI assistant wants to make changes to your data."
+  switch (operation.type) {
+    case "add":
+      return `Add a new ${collectionName}`
+    case "update":
+      return `Update an existing ${collectionName}`
+    case "delete":
+      return `Delete a ${collectionName}`
+    default:
+      return "Unknown operation"
   }
 }
 
 // Generate detailed information about the data edit operation
 export function generateDataEditDetails(operation: DataEditOperation): string {
-  try {
-    const { type, collection, id, query, data } = operation
-    const collectionName = formatCollectionName(collection)
-    const schemas = getDataSchema()
-    const schema = schemas[collection]
-
-    switch (type) {
-      case "add":
-        if (!data) return "No data provided for add operation."
-
-        let addDetails = `Add a new ${collectionName.toLowerCase()} with the following details:\n\n`
-
-        // Format the data based on the schema if available
-        if (schema) {
-          // Add required fields first
-          schema.required.forEach((field) => {
-            if (data[field] !== undefined) {
-              addDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
-            }
-          })
-
-          // Add optional fields
-          schema.optional.forEach((field) => {
-            if (data[field] !== undefined) {
-              addDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
-            }
-          })
-
-          // Add any fields not in the schema
-          Object.keys(data).forEach((field) => {
-            if (!schema.required.includes(field) && !schema.optional.includes(field) && field !== "id") {
-              addDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
-            }
-          })
-        } else {
-          // No schema, just format all fields
-          Object.entries(data).forEach(([field, value]) => {
-            if (field !== "id") {
-              addDetails += `- ${formatFieldName(field)}: ${formatFieldValue(value)}\n`
-            }
-          })
-        }
-
-        return addDetails
-
-      case "update":
-        if (!data) return "No data provided for update operation."
-
-        let updateDetails = `Update ${collectionName.toLowerCase()}`
-
-        if (id) {
-          updateDetails += ` with ID: ${id}`
-        } else if (query) {
-          const queryStr = Object.entries(query)
-            .map(([key, value]) => `${formatFieldName(key)}: ${formatFieldValue(value)}`)
-            .join(", ")
-          updateDetails += ` matching: ${queryStr}`
-        }
-
-        updateDetails += "\n\nChanges to be made:\n\n"
-
-        // Format the data based on the schema if available
-        if (schema) {
-          // Add required fields first
-          schema.required.forEach((field) => {
-            if (data[field] !== undefined) {
-              updateDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
-            }
-          })
-
-          // Add optional fields
-          schema.optional.forEach((field) => {
-            if (data[field] !== undefined) {
-              updateDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
-            }
-          })
-
-          // Add any fields not in the schema
-          Object.keys(data).forEach((field) => {
-            if (!schema.required.includes(field) && !schema.optional.includes(field) && field !== "id") {
-              updateDetails += `- ${formatFieldName(field)}: ${formatFieldValue(data[field])}\n`
-            }
-          })
-        } else {
-          // No schema, just format all fields
-          Object.entries(data).forEach(([field, value]) => {
-            if (field !== "id") {
-              updateDetails += `- ${formatFieldName(field)}: ${formatFieldValue(value)}\n`
-            }
-          })
-        }
-
-        return updateDetails
-
-      case "delete":
-        let deleteDetails = `Delete ${collectionName.toLowerCase()}`
-
-        if (id) {
-          deleteDetails += ` with ID: ${id}`
-        } else if (query) {
-          const queryStr = Object.entries(query)
-            .map(([key, value]) => `${formatFieldName(key)}: ${formatFieldValue(value)}`)
-            .join(", ")
-          deleteDetails += ` matching: ${queryStr}`
-        }
-
-        deleteDetails += "\n\nThis action will permanently remove the data and cannot be undone."
-
-        return deleteDetails
-
-      default:
-        return `Unknown operation type: ${type}`
-    }
-  } catch (error) {
-    console.error("Error generating data edit details:", error)
-    return "Could not generate details for this operation."
-  }
-}
-
-// Format a collection name for display
-function formatCollectionName(collection: string): string {
-  // Convert camelCase to Title Case with spaces
-  return collection
+  const collectionName = operation.collection
     .replace(/([A-Z])/g, " $1")
-    .replace(/^./, (str) => str.toUpperCase())
     .trim()
+    .toLowerCase()
+
+  switch (operation.type) {
+    case "add":
+      return `Add a new ${collectionName} with the provided data.`
+    case "update":
+      return `Update the ${collectionName} with ID: ${operation.id} with the provided data.`
+    case "delete":
+      return `Delete the ${collectionName} with ID: ${operation.id}.`
+    default:
+      return "Unknown operation"
+  }
 }
 
-// Format a field name for display
-function formatFieldName(field: string): string {
-  // Convert camelCase to Title Case with spaces
-  return field
-    .replace(/([A-Z])/g, " $1")
-    .replace(/^./, (str) => str.toUpperCase())
-    .trim()
-}
-
-// Format a field value for display
-function formatFieldValue(value: any): string {
-  if (value === null || value === undefined) {
-    return "None"
-  }
-
-  if (typeof value === "string") {
-    // Truncate long strings
-    if (value.length > 100) {
-      return `"${value.substring(0, 100)}..."`
-    }
-    return `"${value}"`
-  }
-
-  if (typeof value === "boolean") {
-    return value ? "Yes" : "No"
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return "Empty list"
-    }
-
-    if (typeof value[0] === "object" && value[0] !== null) {
-      return `List of ${value.length} items`
-    }
-
-    // Format array of primitive values
-    const formattedItems = value.map((item) => {
-      if (typeof item === "string") {
-        return `"${item}"`
-      }
-      return String(item)
-    })
-
-    // Truncate if too many items
-    if (formattedItems.length > 5) {
-      return `[${formattedItems.slice(0, 5).join(", ")}, ... and ${formattedItems.length - 5} more]`
-    }
-
-    return `[${formattedItems.join(", ")}]`
-  }
-
-  if (typeof value === "object") {
-    return "Complex object"
-  }
-
-  return String(value)
-}
+// Export the DataEditOperation type for use in other files
+export type { DataEditOperation }

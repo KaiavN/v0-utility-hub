@@ -31,6 +31,33 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 const createDirectSupabaseClient = () => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error("Missing Supabase environment variables")
+    // Return a dummy client that will log errors instead of crashing
+    return {
+      auth: {
+        getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+        signInWithOAuth: () => {
+          console.error("Cannot sign in: Missing Supabase credentials")
+          return Promise.resolve({ error: new Error("Missing Supabase credentials") })
+        },
+        signOut: () => Promise.resolve({ error: null }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            single: () => Promise.resolve({ data: null, error: null }),
+          }),
+        }),
+        update: () => ({
+          eq: () => Promise.resolve({ error: null }),
+        }),
+      }),
+    } as any
+  }
+
   return createClient(supabaseUrl, supabaseAnonKey)
 }
 
@@ -53,7 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Check if we have a session
         const {
           data: { session },
+          error: sessionError,
         } = await supabase.auth.getSession()
+
+        if (sessionError) {
+          console.error("Error getting session:", sessionError)
+          throw sessionError
+        }
 
         if (session) {
           // User is logged in
@@ -68,10 +101,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsAuthenticated(true)
 
           // Fetch user profile
-          const { data: profileData } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", session.user.id)
+            .single()
+
+          // Check if the error is just that the profile doesn't exist
+          if (profileError && profileError.code !== "PGRST116") {
+            console.error("Error fetching profile:", profileError)
+          }
 
           if (profileData) {
             setProfile(profileData)
+          } else {
+            // If profile doesn't exist, create one
+            const { error: insertError } = await supabase.from("profiles").insert([
+              {
+                id: session.user.id,
+                email: session.user.email,
+                display_name: userData.name || session.user.email?.split("@")[0] || "User",
+                avatar_url: userData.avatarUrl || null,
+                updated_at: new Date().toISOString(),
+                created_at: new Date().toISOString(),
+                role: "user",
+              },
+            ])
+
+            if (insertError) {
+              console.error("Error creating profile:", insertError)
+              // Continue without throwing - we'll try again on next auth state change
+            } else {
+              // Fetch the newly created profile
+              const { data: newProfile } = await supabase
+                .from("profiles")
+                .select("*")
+                .eq("id", session.user.id)
+                .single()
+
+              if (newProfile) {
+                setProfile(newProfile)
+              }
+            }
           }
         } else {
           // No active session
@@ -95,6 +166,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth state changed:", event)
+
       if (event === "SIGNED_IN" && session) {
         // User signed in
         const userData: User = {
@@ -108,11 +181,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAuthenticated(true)
 
         // Fetch user profile
-        const { data: profileData } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
+        const { data: profileData, error: profileError } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", session.user.id)
+          .single()
+
+        // Check if the error is just that the profile doesn't exist
+        if (profileError && profileError.code !== "PGRST116") {
+          console.error("Error fetching profile after sign in:", profileError)
+        }
 
         if (profileData) {
           setProfile(profileData)
+        } else {
+          // If profile doesn't exist, create one
+          const { error: insertError } = await supabase.from("profiles").insert([
+            {
+              id: session.user.id,
+              email: session.user.email,
+              display_name: userData.name || session.user.email?.split("@")[0] || "User",
+              avatar_url: userData.avatarUrl || null,
+              updated_at: new Date().toISOString(),
+              created_at: new Date().toISOString(),
+              role: "user",
+            },
+          ])
+
+          if (insertError) {
+            console.error("Error creating profile after sign in:", insertError)
+            // Continue without throwing - we'll try again on next login
+          } else {
+            // Fetch the newly created profile
+            const { data: newProfile } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
+
+            if (newProfile) {
+              setProfile(newProfile)
+            }
+          }
         }
+
+        // Redirect to the stored path or home
+        const redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
+        sessionStorage.removeItem("redirectAfterLogin")
+        router.push(redirectPath)
       } else if (event === "SIGNED_OUT" || event === "USER_DELETED") {
         // User signed out
         setUser(null)
@@ -124,7 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       subscription.unsubscribe()
     }
-  }, [])
+  }, [router])
 
   // Get the correct site URL
   const getSiteUrl = () => {
@@ -153,14 +265,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const siteUrl = getSiteUrl()
+      console.log("Logging in with GitHub, redirect URL:", `${siteUrl}/auth/callback`)
 
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { error, data } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
           redirectTo: `${siteUrl}/auth/callback`,
-          queryParams: {
-            redirect_to: `${siteUrl}/auth/callback`,
-          },
         },
       })
 
@@ -171,6 +281,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           description: error.message || "Failed to login with GitHub",
           variant: "destructive",
         })
+      } else {
+        console.log("GitHub login initiated:", data)
       }
     } catch (error) {
       console.error("GitHub login unexpected error:", error)
@@ -195,14 +307,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const siteUrl = getSiteUrl()
+      console.log("Logging in with Google, redirect URL:", `${siteUrl}/auth/callback`)
 
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { error, data } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: `${siteUrl}/auth/callback`,
-          queryParams: {
-            redirect_to: `${siteUrl}/auth/callback`,
-          },
         },
       })
 
@@ -213,6 +323,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           description: error.message || "Failed to login with Google",
           variant: "destructive",
         })
+      } else {
+        console.log("Google login initiated:", data)
       }
     } catch (error) {
       console.error("Google login unexpected error:", error)
@@ -230,7 +342,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     try {
       setIsLoading(true)
-      await supabase.auth.signOut()
+      const { error } = await supabase.auth.signOut()
+
+      if (error) {
+        console.error("Logout error:", error)
+        toast({
+          title: "Logout Failed",
+          description: error.message || "Failed to logout",
+          variant: "destructive",
+        })
+        return
+      }
+
       setUser(null)
       setProfile(null)
       setIsAuthenticated(false)

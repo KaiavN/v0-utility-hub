@@ -1,13 +1,13 @@
 "use client"
 
-import React from "react"
-
+import type React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { ChevronDown, ChevronRight, Plus, MoreHorizontal } from "lucide-react"
+import { ChevronDown, ChevronRight, Plus, MoreHorizontal, Search, FolderIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,7 +72,6 @@ export function ProjectSidebar({
 
   // Add this useEffect to ensure the sidebar refreshes when tasks change
   useEffect(() => {
-    console.log("Tasks updated in ProjectSidebar:", tasks?.length || 0)
     forceRender()
 
     // Force update expanded projects for tasks that don't have sections
@@ -98,16 +97,21 @@ export function ProjectSidebar({
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const [searchQuery, setSearchQuery] = useState("")
-  const [sidebarRef] = useState(React.createRef<HTMLDivElement>())
 
-  const toggleProject = (projectId: string) => {
+  const toggleProject = (projectId: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation()
+    }
     setExpandedProjects((prev) => ({
       ...prev,
       [projectId]: !prev[projectId],
     }))
   }
 
-  const toggleSection = (sectionId: string) => {
+  const toggleSection = (sectionId: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation()
+    }
     setExpandedSections((prev) => ({
       ...prev,
       [sectionId]: !prev[sectionId],
@@ -135,40 +139,38 @@ export function ProjectSidebar({
     [tasks],
   )
 
-  // Enhance the filtering logic to search more deeply and highlight matches
+  // Enhanced filtering logic to search more deeply
+  const filteredProjects = useMemo(() => {
+    if (!searchQuery) return projects || []
 
-  // Update the filteredProjects calculation to search more thoroughly
-  const filteredProjects = searchQuery
-    ? (projects || []).filter((project) => {
-        if (!project) return false
+    return (projects || []).filter((project) => {
+      if (!project) return false
 
-        // Check if project name or description matches
-        const projectMatches =
-          project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (project.description && project.description.toLowerCase().includes(searchQuery.toLowerCase()))
+      // Check if project name or description matches
+      const projectMatches =
+        project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (project.description && project.description.toLowerCase().includes(searchQuery.toLowerCase()))
 
-        // Check if any section in this project matches
-        const sectionMatches = (sections || []).some(
-          (section) =>
-            section &&
-            section.projectId === project.id &&
-            section.name.toLowerCase().includes(searchQuery.toLowerCase()),
-        )
+      // Check if any section in this project matches
+      const sectionMatches = (sections || []).some(
+        (section) =>
+          section && section.projectId === project.id && section.name.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
 
-        // Check if any task in this project matches (including section tasks)
-        const taskMatches = (tasks || []).some(
-          (task) =>
-            task &&
-            task.projectId === project.id &&
-            (task.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              (task.description && task.description.toLowerCase().includes(searchQuery.toLowerCase()))),
-        )
+      // Check if any task in this project matches (including section tasks)
+      const taskMatches = (tasks || []).some(
+        (task) =>
+          task &&
+          task.projectId === project.id &&
+          (task.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (task.description && task.description.toLowerCase().includes(searchQuery.toLowerCase()))),
+      )
 
-        return projectMatches || sectionMatches || taskMatches
-      })
-    : projects || []
+      return projectMatches || sectionMatches || taskMatches
+    })
+  }, [projects, sections, tasks, searchQuery])
 
-  // Add a helper function to highlight matching text
+  // Helper function to highlight matching text
   const highlightMatch = (text: string, query: string) => {
     if (!query || !text) return text
 
@@ -188,72 +190,6 @@ export function ProjectSidebar({
         </span>
         {text.substring(endIndex)}
       </>
-    )
-  }
-
-  // Debug output
-  console.log("Rendering ProjectSidebar with", tasks?.length || 0, "tasks")
-
-  // Add this debugging log
-  console.log("ProjectSidebar tasks:", tasks)
-
-  // Modify the grouping logic to handle tasks without projectId
-  const groupedTasks = useMemo(() => {
-    if (!Array.isArray(tasks)) {
-      console.error("Tasks is not an array:", tasks)
-      return {}
-    }
-
-    const grouped = {}
-
-    // First, group by project
-    tasks.forEach((task) => {
-      if (!task) return
-
-      const projectId = task.projectId || "ungrouped"
-
-      if (!grouped[projectId]) {
-        grouped[projectId] = {}
-      }
-
-      // Then by section if available
-      const sectionId = task.sectionId || "unsectioned"
-
-      if (!grouped[projectId][sectionId]) {
-        grouped[projectId][sectionId] = []
-      }
-
-      grouped[projectId][sectionId].push(task)
-    })
-
-    console.log("Grouped tasks in sidebar:", grouped)
-    return grouped
-  }, [tasks])
-
-  // Render project tasks in the sidebar
-  const renderProjectTasks = (projectId: string, isExpanded: boolean) => {
-    if (!isExpanded) return null
-
-    const projectTasks = getProjectTasks(projectId)
-    if (projectTasks.length === 0) return null
-
-    return (
-      <div className="ml-4 pl-2 border-l">
-        {projectTasks.map((task) => (
-          <div
-            key={task.id}
-            className={cn(
-              "flex items-center p-2 rounded-md cursor-pointer hover:bg-muted/50",
-              selectedTaskId === task.id && "bg-muted",
-            )}
-            onClick={() => onTaskSelect(task.id)}
-          >
-            <div className="pl-4 flex items-center h-full">
-              <span className="text-sm truncate">{task.name}</span>
-            </div>
-          </div>
-        ))}
-      </div>
     )
   }
 
@@ -300,234 +236,269 @@ export function ProjectSidebar({
   return (
     <Card className="border-0 rounded-none shadow-none h-full">
       <CardContent className="p-0 h-full">
-        <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="font-semibold">Projects</h2>
-          <Button size="sm" onClick={onAddProject}>
-            <Plus className="h-4 w-4 mr-1" />
-            Add Project
-          </Button>
-        </div>
-        <ScrollArea className="h-[calc(100vh-200px)]">
-          <div className="p-2">
-            {/* Render ungrouped tasks first */}
-            {renderUngroupedTasks()}
+        <div className="flex flex-col h-full">
+          <div className="flex items-center justify-between p-4 border-b">
+            <h2 className="font-semibold flex items-center">
+              <FolderIcon className="h-4 w-4 mr-2" />
+              Projects
+            </h2>
+            <Button size="sm" onClick={onAddProject} className="gap-1">
+              <Plus className="h-4 w-4" />
+              Add Project
+            </Button>
+          </div>
 
-            {(!projects || projects.length === 0) && (!tasks || tasks.length === 0) ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center px-4">
-                <h3 className="text-lg font-medium mb-2">No projects yet</h3>
-                <p className="text-sm text-muted-foreground mb-4">Create your first project to get started</p>
-                <Button onClick={onAddProject} className="gap-1">
-                  <Plus className="h-4 w-4" />
-                  Add Project
-                </Button>
-              </div>
-            ) : (
-              // Existing project list rendering code
-              <div className="space-y-4 p-4">
-                {(projects || []).map((project) => {
-                  if (!project) return null
+          <div className="p-3 border-b">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search projects and tasks..."
+                className="pl-8"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
 
-                  const projectSections = (sections || []).filter(
-                    (section) => section && section.projectId === project.id,
-                  )
-                  const isExpanded = expandedProjects[project.id]
-                  const isSelected = selectedProject === project.id
-                  const taskCount = getTaskCount(project.id)
-                  const projectTasks = getProjectTasks(project.id)
+          <ScrollArea className="flex-1">
+            <div className="p-2">
+              {/* Render ungrouped tasks first */}
+              {renderUngroupedTasks()}
 
-                  return (
-                    <div key={project.id} className="mb-1">
-                      <div
-                        className={cn(
-                          "flex items-center p-2 rounded-md cursor-pointer group hover:bg-muted/50",
-                          isSelected && "bg-muted",
-                        )}
-                      >
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5 p-0 mr-1"
-                          onClick={() => toggleProject(project.id)}
-                        >
-                          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                        </Button>
+              {(!projects || projects.length === 0) && (!tasks || tasks.length === 0) ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center px-4">
+                  <FolderIcon className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium mb-2">No projects yet</h3>
+                  <p className="text-sm text-muted-foreground mb-4">Create your first project to get started</p>
+                  <Button onClick={onAddProject} className="gap-1">
+                    <Plus className="h-4 w-4" />
+                    Add Project
+                  </Button>
+                </div>
+              ) : (
+                // Project list rendering
+                <div className="space-y-1 p-2">
+                  {filteredProjects.map((project) => {
+                    if (!project) return null
+
+                    const projectSections = (sections || []).filter(
+                      (section) => section && section.projectId === project.id,
+                    )
+                    const isExpanded = expandedProjects[project.id]
+                    const isSelected = selectedProject === project.id
+                    const taskCount = getTaskCount(project.id)
+                    const projectTasks = getProjectTasks(project.id)
+
+                    return (
+                      <div key={project.id} className="mb-1">
                         <div
-                          className="flex items-center flex-1 overflow-hidden"
-                          onClick={() => onSelectProject(project.id)}
+                          className={cn(
+                            "flex items-center p-2 rounded-md cursor-pointer group hover:bg-muted/50 transition-colors",
+                            isSelected && "bg-muted",
+                          )}
                         >
-                          <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: project.color }} />
-                          <span className="font-medium truncate">{project.name}</span>
-                          {taskCount > 0 && (
-                            <Badge variant="outline" className="ml-2 text-xs">
-                              {taskCount}
-                            </Badge>
-                          )}
-                        </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => onAddTask(project.id)}>Add Task</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => onAddSection(project.id)}>Add Section</DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => onEditProject(project.id)}>Edit Project</DropdownMenuItem>
-                            <DropdownMenuItem className="text-destructive" onClick={() => onDeleteProject(project.id)}>
-                              Delete Project
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-
-                      {isExpanded && (
-                        <div className="ml-4 pl-2 border-l">
-                          {/* Project Tasks */}
-                          {projectTasks.length > 0 && (
-                            <div className="mt-1">
-                              {projectTasks.map((task) => (
-                                <div
-                                  key={task.id}
-                                  className={cn(
-                                    "flex items-center p-2 rounded-md cursor-pointer hover:bg-muted/50",
-                                    selectedTaskId === task.id && "bg-muted",
-                                  )}
-                                  onClick={() => onTaskSelect(task.id)}
-                                >
-                                  <div className="flex items-center h-full">
-                                    <div
-                                      className="w-2 h-2 rounded-full mr-2"
-                                      style={{ backgroundColor: project.color }}
-                                    />
-                                    <span className="text-sm truncate">{task.name}</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Sections */}
-                          {projectSections.map((section) => {
-                            if (!section) return null
-
-                            const sectionTasks = getSectionTasks(section.id)
-                            const isSectionExpanded = expandedSections[section.id]
-                            const isSectionSelected = selectedSection === section.id
-
-                            return (
-                              <div key={section.id} className="mb-1">
-                                <div
-                                  className={cn(
-                                    "flex items-center p-2 rounded-md cursor-pointer group hover:bg-muted/50",
-                                    isSectionSelected && "bg-muted",
-                                  )}
-                                >
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-5 w-5 p-0 mr-1"
-                                    onClick={() => toggleSection(section.id)}
-                                  >
-                                    {isSectionExpanded ? (
-                                      <ChevronDown className="h-4 w-4" />
-                                    ) : (
-                                      <ChevronRight className="h-4 w-4" />
-                                    )}
-                                  </Button>
-                                  <div
-                                    className="flex items-center flex-1 overflow-hidden"
-                                    onClick={() => onSelectSection(section.id)}
-                                  >
-                                    <div
-                                      className="w-3 h-3 rounded-sm mr-2"
-                                      style={{ backgroundColor: section.color }}
-                                    />
-                                    <span className="truncate">{section.name}</span>
-                                    {sectionTasks.length > 0 && (
-                                      <Badge variant="outline" className="ml-2 text-xs">
-                                        {sectionTasks.length}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
-                                      >
-                                        <MoreHorizontal className="h-4 w-4" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      <DropdownMenuItem onClick={() => onAddTask(project.id, section.id)}>
-                                        Add Task
-                                      </DropdownMenuItem>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem onClick={() => onEditSection(section.id)}>
-                                        Edit Section
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        className="text-destructive"
-                                        onClick={() => onDeleteSection(section.id)}
-                                      >
-                                        Delete Section
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </div>
-
-                                {/* Section Tasks */}
-                                {isSectionExpanded && sectionTasks.length > 0 && (
-                                  <div className="ml-4">
-                                    {sectionTasks.map((task) => (
-                                      <div
-                                        key={task.id}
-                                        className={cn(
-                                          "flex items-center p-2 rounded-md cursor-pointer hover:bg-muted/50",
-                                          selectedTaskId === task.id && "bg-muted",
-                                        )}
-                                        onClick={() => onTaskSelect(task.id)}
-                                      >
-                                        <div className="flex items-center h-full">
-                                          <div
-                                            className="w-2 h-2 rounded-full mr-2"
-                                            style={{ backgroundColor: section.color }}
-                                          />
-                                          <span className="text-sm truncate">{task.name}</span>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )
-                          })}
-
-                          {/* Add Section Button */}
                           <Button
                             variant="ghost"
-                            size="sm"
-                            className="w-full justify-start text-muted-foreground mt-1"
-                            onClick={() => onAddSection(project.id)}
+                            size="icon"
+                            className="h-5 w-5 p-0 mr-1"
+                            onClick={(e) => toggleProject(project.id, e)}
                           >
-                            <Plus className="h-4 w-4 mr-1" />
-                            Add Section
+                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                           </Button>
+                          <div
+                            className="flex items-center flex-1 overflow-hidden"
+                            onClick={() => onSelectProject(project.id)}
+                          >
+                            <div
+                              className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
+                              style={{ backgroundColor: project.color }}
+                            />
+                            <span className="font-medium truncate">
+                              {searchQuery ? highlightMatch(project.name, searchQuery) : project.name}
+                            </span>
+                            {taskCount > 0 && (
+                              <Badge variant="outline" className="ml-2 text-xs">
+                                {taskCount}
+                              </Badge>
+                            )}
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => onAddTask(project.id)}>Add Task</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => onAddSection(project.id)}>Add Section</DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => onEditProject(project.id)}>
+                                Edit Project
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onClick={() => onDeleteProject(project.id)}
+                              >
+                                Delete Project
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </ScrollArea>
+
+                        {isExpanded && (
+                          <div className="ml-4 pl-2 border-l mt-1">
+                            {/* Project Tasks */}
+                            {projectTasks.length > 0 && (
+                              <div className="mt-1 space-y-1">
+                                {projectTasks.map((task) => (
+                                  <div
+                                    key={task.id}
+                                    className={cn(
+                                      "flex items-center p-2 rounded-md cursor-pointer hover:bg-muted/50 transition-colors",
+                                      selectedTaskId === task.id && "bg-muted",
+                                    )}
+                                    onClick={() => onTaskSelect(task.id)}
+                                  >
+                                    <div className="flex items-center h-full">
+                                      <div
+                                        className="w-2 h-2 rounded-full mr-2 flex-shrink-0"
+                                        style={{ backgroundColor: project.color }}
+                                      />
+                                      <span className="text-sm truncate">
+                                        {searchQuery ? highlightMatch(task.name, searchQuery) : task.name}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Sections */}
+                            {projectSections.map((section) => {
+                              if (!section) return null
+
+                              const sectionTasks = getSectionTasks(section.id)
+                              const isSectionExpanded = expandedSections[section.id]
+                              const isSectionSelected = selectedSection === section.id
+
+                              return (
+                                <div key={section.id} className="mb-1">
+                                  <div
+                                    className={cn(
+                                      "flex items-center p-2 rounded-md cursor-pointer group hover:bg-muted/50 transition-colors",
+                                      isSectionSelected && "bg-muted",
+                                    )}
+                                  >
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5 p-0 mr-1"
+                                      onClick={(e) => toggleSection(section.id, e)}
+                                    >
+                                      {isSectionExpanded ? (
+                                        <ChevronDown className="h-4 w-4" />
+                                      ) : (
+                                        <ChevronRight className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                    <div
+                                      className="flex items-center flex-1 overflow-hidden"
+                                      onClick={() => onSelectSection(section.id)}
+                                    >
+                                      <div
+                                        className="w-3 h-3 rounded-sm mr-2 flex-shrink-0"
+                                        style={{ backgroundColor: section.color }}
+                                      />
+                                      <span className="truncate">
+                                        {searchQuery ? highlightMatch(section.name, searchQuery) : section.name}
+                                      </span>
+                                      {sectionTasks.length > 0 && (
+                                        <Badge variant="outline" className="ml-2 text-xs">
+                                          {sectionTasks.length}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                          <MoreHorizontal className="h-4 w-4" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => onAddTask(project.id, section.id)}>
+                                          Add Task
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem onClick={() => onEditSection(section.id)}>
+                                          Edit Section
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          className="text-destructive"
+                                          onClick={() => onDeleteSection(section.id)}
+                                        >
+                                          Delete Section
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </div>
+
+                                  {/* Section Tasks */}
+                                  {isSectionExpanded && sectionTasks.length > 0 && (
+                                    <div className="ml-4 space-y-1 mt-1">
+                                      {sectionTasks.map((task) => (
+                                        <div
+                                          key={task.id}
+                                          className={cn(
+                                            "flex items-center p-2 rounded-md cursor-pointer hover:bg-muted/50 transition-colors",
+                                            selectedTaskId === task.id && "bg-muted",
+                                          )}
+                                          onClick={() => onTaskSelect(task.id)}
+                                        >
+                                          <div className="flex items-center h-full">
+                                            <div
+                                              className="w-2 h-2 rounded-full mr-2 flex-shrink-0"
+                                              style={{ backgroundColor: section.color }}
+                                            />
+                                            <span className="text-sm truncate">
+                                              {searchQuery ? highlightMatch(task.name, searchQuery) : task.name}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+
+                            {/* Add Section Button */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-start text-muted-foreground mt-1"
+                              onClick={() => onAddSection(project.id)}
+                            >
+                              <Plus className="h-4 w-4 mr-1" />
+                              Add Section
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
       </CardContent>
     </Card>
   )

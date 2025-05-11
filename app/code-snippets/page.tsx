@@ -1,7 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { PlusCircle, Search, Trash2, Copy, Check, Code, Tag, Filter } from "lucide-react"
+import type React from "react"
+
+import { useState, useEffect, useCallback, useRef } from "react"
+import { PlusCircle, Search, Trash2, Copy, Check, Code, Tag, Filter, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -9,6 +11,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { getLocalStorage, setLocalStorage } from "@/lib/local-storage"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import { CodeEditor } from "@/components/code-snippet/code-editor"
 import {
   Dialog,
   DialogContent,
@@ -19,6 +22,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface CodeSnippet {
   id: string
@@ -29,6 +33,8 @@ interface CodeSnippet {
   description: string
   createdAt: string
   updatedAt: string
+  output?: string
+  error?: string | null
 }
 
 const languages = [
@@ -47,9 +53,21 @@ const languages = [
   "SQL",
   "Bash",
   "JSON",
+  "XML",
+  "YAML",
   "Markdown",
+  "GraphQL",
+  "Rust",
+  "Dart",
+  "Lua",
+  "R",
+  "Perl",
+  "Scala",
   "Other",
 ]
+
+// Languages that can be executed in the browser
+const executableLanguages = ["javascript", "js", "typescript", "ts", "json"]
 
 export default function CodeSnippetsPage() {
   const { toast } = useToast()
@@ -61,61 +79,102 @@ export default function CodeSnippetsPage() {
   const [newTagName, setNewTagName] = useState("")
   const [filterTags, setFilterTags] = useState<string[]>([])
   const [showTagDialog, setShowTagDialog] = useState(false)
+  const [showExecutableOnly, setShowExecutableOnly] = useState(false)
 
+  // Use refs to track previous values and prevent unnecessary updates
+  const previousActiveSnippetRef = useRef<CodeSnippet | null>(null)
+  const updatingRef = useRef(false)
+
+  // Load snippets from local storage
   useEffect(() => {
     const savedSnippets = getLocalStorage<CodeSnippet[]>("code-snippets", [])
     setSnippets(savedSnippets)
+    if (savedSnippets.length > 0 && !activeSnippet) {
+      setActiveSnippet(savedSnippets[0])
+      previousActiveSnippetRef.current = savedSnippets[0]
+    }
   }, [])
 
-  const saveSnippets = (updatedSnippets: CodeSnippet[]) => {
+  // Save snippets to local storage
+  const saveSnippets = useCallback((updatedSnippets: CodeSnippet[]) => {
     setSnippets(updatedSnippets)
     setLocalStorage("code-snippets", updatedSnippets)
-  }
+  }, [])
 
-  const createNewSnippet = () => {
+  // Create a new snippet
+  const createNewSnippet = useCallback(() => {
     const newSnippet: CodeSnippet = {
       id: Date.now().toString(),
       title: "Untitled Snippet",
-      code: "",
+      code: "// Enter your code here",
       language: "JavaScript",
       tags: [],
       description: "",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      output: "",
+      error: null,
     }
 
     const updatedSnippets = [newSnippet, ...snippets]
     saveSnippets(updatedSnippets)
     setActiveSnippet(newSnippet)
+    previousActiveSnippetRef.current = newSnippet
 
     toast({
       title: "Snippet created",
       description: "Your new code snippet has been created.",
     })
-  }
+  }, [snippets, saveSnippets, toast])
 
-  const updateSnippet = (updatedSnippet: CodeSnippet) => {
-    updatedSnippet.updatedAt = new Date().toISOString()
-    const updatedSnippets = snippets.map((snippet) => (snippet.id === updatedSnippet.id ? updatedSnippet : snippet))
-    saveSnippets(updatedSnippets)
-    setActiveSnippet(updatedSnippet)
-  }
+  // Update a snippet
+  const updateSnippet = useCallback(
+    (updatedSnippet: CodeSnippet) => {
+      // Prevent recursive updates
+      if (updatingRef.current) return
+      updatingRef.current = true
 
-  const deleteSnippet = (id: string) => {
-    const updatedSnippets = snippets.filter((snippet) => snippet.id !== id)
-    saveSnippets(updatedSnippets)
+      try {
+        updatedSnippet.updatedAt = new Date().toISOString()
 
-    if (activeSnippet && activeSnippet.id === id) {
-      setActiveSnippet(updatedSnippets.length > 0 ? updatedSnippets[0] : null)
-    }
+        // Only update if something actually changed
+        if (JSON.stringify(updatedSnippet) !== JSON.stringify(previousActiveSnippetRef.current)) {
+          const updatedSnippets = snippets.map((snippet) =>
+            snippet.id === updatedSnippet.id ? updatedSnippet : snippet,
+          )
+          saveSnippets(updatedSnippets)
+          setActiveSnippet(updatedSnippet)
+          previousActiveSnippetRef.current = updatedSnippet
+        }
+      } finally {
+        updatingRef.current = false
+      }
+    },
+    [snippets, saveSnippets],
+  )
 
-    toast({
-      title: "Snippet deleted",
-      description: "Your code snippet has been deleted.",
-    })
-  }
+  // Delete a snippet
+  const deleteSnippet = useCallback(
+    (id: string) => {
+      const updatedSnippets = snippets.filter((snippet) => snippet.id !== id)
+      saveSnippets(updatedSnippets)
 
-  const copyToClipboard = () => {
+      if (activeSnippet && activeSnippet.id === id) {
+        const newActiveSnippet = updatedSnippets.length > 0 ? updatedSnippets[0] : null
+        setActiveSnippet(newActiveSnippet)
+        previousActiveSnippetRef.current = newActiveSnippet
+      }
+
+      toast({
+        title: "Snippet deleted",
+        description: "Your code snippet has been deleted.",
+      })
+    },
+    [snippets, activeSnippet, saveSnippets, toast],
+  )
+
+  // Copy code to clipboard
+  const copyToClipboard = useCallback(() => {
     if (activeSnippet) {
       navigator.clipboard.writeText(activeSnippet.code)
       setCopied(true)
@@ -126,9 +185,39 @@ export default function CodeSnippetsPage() {
         description: "Your code snippet has been copied to clipboard.",
       })
     }
-  }
+  }, [activeSnippet, toast])
 
-  const addTag = () => {
+  // Handle code changes
+  const handleCodeChange = useCallback(
+    (code: string) => {
+      if (activeSnippet && !updatingRef.current) {
+        const updatedSnippet = {
+          ...activeSnippet,
+          code,
+        }
+        updateSnippet(updatedSnippet)
+      }
+    },
+    [activeSnippet, updateSnippet],
+  )
+
+  // Handle code execution results
+  const handleCodeRun = useCallback(
+    (output: string, error: string | null) => {
+      if (activeSnippet && !updatingRef.current) {
+        const updatedSnippet = {
+          ...activeSnippet,
+          output,
+          error,
+        }
+        updateSnippet(updatedSnippet)
+      }
+    },
+    [activeSnippet, updateSnippet],
+  )
+
+  // Add a tag to the active snippet
+  const addTag = useCallback(() => {
     if (activeSnippet && newTagName.trim() !== "") {
       if (!activeSnippet.tags.includes(newTagName.trim())) {
         const updatedSnippet = {
@@ -146,29 +235,67 @@ export default function CodeSnippetsPage() {
         })
       }
     }
-  }
+  }, [activeSnippet, newTagName, updateSnippet, toast])
 
-  const removeTag = (tag: string) => {
-    if (activeSnippet) {
-      const updatedSnippet = {
-        ...activeSnippet,
-        tags: activeSnippet.tags.filter((t) => t !== tag),
+  // Remove a tag from the active snippet
+  const removeTag = useCallback(
+    (tag: string) => {
+      if (activeSnippet) {
+        const updatedSnippet = {
+          ...activeSnippet,
+          tags: activeSnippet.tags.filter((t) => t !== tag),
+        }
+        updateSnippet(updatedSnippet)
       }
-      updateSnippet(updatedSnippet)
-    }
-  }
+    },
+    [activeSnippet, updateSnippet],
+  )
 
-  const toggleFilterTag = (tag: string) => {
-    if (filterTags.includes(tag)) {
-      setFilterTags(filterTags.filter((t) => t !== tag))
-    } else {
-      setFilterTags([...filterTags, tag])
-    }
-  }
+  // Toggle a tag in the filter
+  const toggleFilterTag = useCallback((tag: string) => {
+    setFilterTags((prev) => {
+      if (prev.includes(tag)) {
+        return prev.filter((t) => t !== tag)
+      } else {
+        return [...prev, tag]
+      }
+    })
+  }, [])
+
+  // Handle title change
+  const handleTitleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (activeSnippet) {
+        updateSnippet({ ...activeSnippet, title: e.target.value })
+      }
+    },
+    [activeSnippet, updateSnippet],
+  )
+
+  // Handle description change
+  const handleDescriptionChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (activeSnippet) {
+        updateSnippet({ ...activeSnippet, description: e.target.value })
+      }
+    },
+    [activeSnippet, updateSnippet],
+  )
+
+  // Handle language change
+  const handleLanguageChange = useCallback(
+    (value: string) => {
+      if (activeSnippet) {
+        updateSnippet({ ...activeSnippet, language: value })
+      }
+    },
+    [activeSnippet, updateSnippet],
+  )
 
   // Get all unique tags from all snippets
   const allTags = Array.from(new Set(snippets.flatMap((snippet) => snippet.tags))).sort()
 
+  // Filter snippets based on search, language, tags, and executable flag
   const filteredSnippets = snippets.filter((snippet) => {
     const matchesSearch =
       snippet.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -179,8 +306,15 @@ export default function CodeSnippetsPage() {
 
     const matchesTags = filterTags.length === 0 || filterTags.every((tag) => snippet.tags.includes(tag))
 
-    return matchesSearch && matchesLanguage && matchesTags
+    const matchesExecutable = !showExecutableOnly || executableLanguages.includes(snippet.language.toLowerCase())
+
+    return matchesSearch && matchesLanguage && matchesTags && matchesExecutable
   })
+
+  // Check if a language is executable
+  const isLanguageExecutable = useCallback((language: string) => {
+    return executableLanguages.includes(language.toLowerCase())
+  }, [])
 
   return (
     <div className="container mx-auto p-6">
@@ -213,11 +347,28 @@ export default function CodeSnippetsPage() {
               <SelectItem value="All">All Languages</SelectItem>
               {languages.map((lang) => (
                 <SelectItem key={lang} value={lang}>
-                  {lang}
+                  {lang} {isLanguageExecutable(lang) && <Play className="inline h-3 w-3 ml-1" />}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={showExecutableOnly ? "default" : "outline"}
+                  size="icon"
+                  onClick={() => setShowExecutableOnly(!showExecutableOnly)}
+                >
+                  <Play className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {showExecutableOnly ? "Showing executable languages only" : "Show executable languages only"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
 
           <Dialog>
             <DialogTrigger asChild>
@@ -270,10 +421,25 @@ export default function CodeSnippetsPage() {
                   className={`cursor-pointer transition-colors hover:bg-muted/50 ${
                     activeSnippet?.id === snippet.id ? "border-primary" : ""
                   }`}
-                  onClick={() => setActiveSnippet(snippet)}
+                  onClick={() => {
+                    setActiveSnippet(snippet)
+                    previousActiveSnippetRef.current = snippet
+                  }}
                 >
                   <CardHeader className="p-4">
-                    <CardTitle className="line-clamp-1 text-base">{snippet.title}</CardTitle>
+                    <CardTitle className="line-clamp-1 text-base flex items-center justify-between">
+                      <span>{snippet.title}</span>
+                      {isLanguageExecutable(snippet.language) && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Play className="h-3 w-3 text-green-500" />
+                            </TooltipTrigger>
+                            <TooltipContent>This language can be executed</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                    </CardTitle>
                     <CardDescription className="flex items-center justify-between">
                       <Badge variant="outline">{snippet.language}</Badge>
                       <span className="text-xs">{new Date(snippet.updatedAt).toLocaleDateString()}</span>
@@ -311,7 +477,7 @@ export default function CodeSnippetsPage() {
                 <div className="flex items-center justify-between">
                   <Input
                     value={activeSnippet.title}
-                    onChange={(e) => updateSnippet({ ...activeSnippet, title: e.target.value })}
+                    onChange={handleTitleChange}
                     className="mb-2 border-none bg-transparent p-0 text-xl font-bold focus-visible:ring-0"
                   />
                   <Button variant="ghost" size="icon" onClick={copyToClipboard}>
@@ -319,17 +485,14 @@ export default function CodeSnippetsPage() {
                   </Button>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Select
-                    value={activeSnippet.language}
-                    onValueChange={(value) => updateSnippet({ ...activeSnippet, language: value })}
-                  >
+                  <Select value={activeSnippet.language} onValueChange={handleLanguageChange}>
                     <SelectTrigger className="w-[150px]">
                       <SelectValue placeholder="Select language" />
                     </SelectTrigger>
                     <SelectContent>
                       {languages.map((lang) => (
                         <SelectItem key={lang} value={lang}>
-                          {lang}
+                          {lang} {isLanguageExecutable(lang) && <Play className="inline h-3 w-3 ml-1" />}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -390,28 +553,30 @@ export default function CodeSnippetsPage() {
 
                 <Input
                   value={activeSnippet.description}
-                  onChange={(e) => updateSnippet({ ...activeSnippet, description: e.target.value })}
+                  onChange={handleDescriptionChange}
                   className="mt-2"
                   placeholder="Add a description..."
                 />
               </CardHeader>
               <CardContent className="p-6 pt-0">
                 <div className="relative">
-                  <pre className="rounded-md bg-muted p-4">
-                    <code className="block overflow-x-auto whitespace-pre text-sm">
-                      <textarea
-                        value={activeSnippet.code}
-                        onChange={(e) => updateSnippet({ ...activeSnippet, code: e.target.value })}
-                        className="h-[calc(100vh-450px)] w-full resize-none bg-transparent font-mono focus:outline-none"
-                        placeholder="// Enter your code here"
-                        spellCheck="false"
-                      />
-                    </code>
-                  </pre>
+                  <CodeEditor
+                    initialCode={activeSnippet.code}
+                    language={activeSnippet.language}
+                    onChange={handleCodeChange}
+                    onRun={handleCodeRun}
+                  />
                 </div>
               </CardContent>
               <CardFooter className="border-t p-6 text-sm text-muted-foreground">
-                Last updated: {new Date(activeSnippet.updatedAt).toLocaleString()}
+                <div className="flex justify-between w-full">
+                  <span>Last updated: {new Date(activeSnippet.updatedAt).toLocaleString()}</span>
+                  <span>
+                    {isLanguageExecutable(activeSnippet.language)
+                      ? "This language can be executed in the browser"
+                      : "This language is for display only"}
+                  </span>
+                </div>
               </CardFooter>
             </Card>
           ) : (

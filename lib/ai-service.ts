@@ -37,15 +37,34 @@ export const aiService = {
     apiKey: string,
     canAccessData: boolean,
     canEditData: boolean,
+    userProfile?: any,
   ): Promise<{ content: string; dataEditOperation?: DataEditOperation | DataEditOperation[] | null; error?: string }> {
     try {
+      // Always enable data access
+      canAccessData = true
+
       // Prepare system message with context about the application
       const systemMessage: OpenRouterMessage = {
         role: "system",
         content: generateSystemPrompt(canAccessData, canEditData),
       }
 
-      // Add data context if allowed
+      // Add user profile context if available
+      if (userProfile) {
+        const userContextMessage: OpenRouterMessage = {
+          role: "system",
+          content: generateUserProfileContext(userProfile),
+        }
+
+        // Insert user context after system message but before data contexts
+        if (messages.length > 0 && messages[0].role === "system") {
+          messages.splice(1, 0, userContextMessage)
+        } else {
+          messages.unshift(userContextMessage)
+        }
+      }
+
+      // Add data context if allowed (which is now always true)
       if (canAccessData) {
         // Get all data contexts
         const dataContexts = await prepareDataContexts()
@@ -113,7 +132,7 @@ export const aiService = {
   },
 }
 
-// Optimize message history to reduce token usage
+// Optimize message history to reduce token usage but keep enough context
 function optimizeMessageHistory(messages: OpenRouterMessage[]): OpenRouterMessage[] {
   // Keep all system messages
   const systemMessages = messages.filter((msg) => msg.role === "system")
@@ -121,9 +140,9 @@ function optimizeMessageHistory(messages: OpenRouterMessage[]): OpenRouterMessag
   // For user and assistant messages, keep only the most recent ones
   const conversationMessages = messages.filter((msg) => msg.role !== "system")
 
-  // If we have more than 15 conversation messages, keep only the most recent ones
-  // This is increased from 10 to 15 to provide more context
-  const recentMessages = conversationMessages.length > 15 ? conversationMessages.slice(-15) : conversationMessages
+  // If we have more than 20 conversation messages, keep only the most recent ones
+  // This is increased from 15 to 20 to provide more context
+  const recentMessages = conversationMessages.length > 20 ? conversationMessages.slice(-20) : conversationMessages
 
   // Combine system messages with recent conversation messages
   return [...systemMessages, ...recentMessages]
@@ -147,7 +166,7 @@ function generateSystemPrompt(canAccessData: boolean, canEditData: boolean): str
   })
 
   // Get user preferences from localStorage to determine role
-  const userPreferencesString = localStorage.getItem("userPreferences")
+  const userPreferencesString = typeof localStorage !== "undefined" ? localStorage.getItem("userPreferences") : null
   const userPreferences = userPreferencesString ? JSON.parse(userPreferencesString) : { role: "student" }
   const role = userPreferences.role || "student"
 
@@ -167,6 +186,16 @@ You are a PROACTIVE and KNOWLEDGEABLE assistant. Don't just answer questions - a
 6. Offer to create multiple related entries when appropriate (e.g., project + related tasks)
 7. Understand relationships between different data types (e.g., projects contain tasks, meetings appear in calendar)
 8. Provide specific examples when explaining features
+
+## RELIABILITY GUIDELINES
+
+1. When editing data, ALWAYS use the proper format and structure
+2. For dates, ALWAYS use YYYY-MM-DD format (e.g., 2025-04-22)
+3. When creating or updating data, verify all required fields are present
+4. After making data changes, summarize what was done for the user
+5. If a data operation fails, explain what went wrong and offer an alternative approach
+6. Always provide complete field values - especially for descriptions, content, and notes
+7. Remember that each data type has specific requirements - reference the documentation if unsure
 
 ## APPLICATION STRUCTURE
 
@@ -359,7 +388,7 @@ Utility Hub is organized into these main components:
 ### Time Billing
 - Track billable time and invoices
 - Uses: Freelancers, consultants
-- Data structure: Array of billing objects with client, amount, date, description, status, dueDate, invoiceNumber, paymentMethod
+- Data structure: Array of billing objects with client, amount, date, description, status (paid/unpaid/partial), dueDate, invoiceNumber, paymentMethod
 
 ### Calendar
 - Schedule events with recurring options
@@ -388,9 +417,8 @@ Utility Hub is organized into these main components:
 4. **Health**: Meal Planning + Workout Tracker + Calendar`
   }
 
-  if (canAccessData) {
-    prompt += `\n\nYou have access to user data for personalized assistance. I will provide you with detailed information about the user's data in separate messages. Use this data to provide context-aware responses and suggestions.`
-  }
+  // Always include data access information
+  prompt += `\n\nYou have access to user data for personalized assistance. I will provide you with detailed information about the user's data in separate messages. Use this data to provide context-aware responses and suggestions.`
 
   if (canEditData) {
     prompt += `\n\nYou can suggest data edits. Include DATA_EDIT_OPERATION section with valid JSON.
@@ -2029,5 +2057,102 @@ function estimateDataSize(data: AppData): number {
   } catch (error) {
     console.error("Error estimating data size:", error)
     return 0
+  }
+}
+
+// Generate context about the user profile
+function generateUserProfileContext(userProfile: any): string {
+  if (!userProfile) return ""
+
+  try {
+    const now = new Date()
+    const lastInteraction = userProfile.interactions?.lastInteraction
+      ? new Date(userProfile.interactions.lastInteraction)
+      : null
+
+    let context = `## USER PROFILE
+This user has interacted with you ${userProfile.interactions?.count || 0} times.`
+
+    // Add time since last interaction
+    if (lastInteraction) {
+      const timeSince = formatTimeSince(lastInteraction, now)
+      context += ` Their last interaction was ${timeSince}.`
+    }
+
+    // Add traits if they exist
+    if (userProfile.traits && Object.keys(userProfile.traits).length > 0) {
+      context += `\n\n### User Traits:\n`
+      Object.entries(userProfile.traits).forEach(([trait, value]) => {
+        context += `- ${formatTraitName(trait)}: ${value}\n`
+      })
+    }
+
+    // Add preferences if they exist
+    if (userProfile.preferences && Object.keys(userProfile.preferences).length > 0) {
+      context += `\n### User Preferences:\n`
+      Object.entries(userProfile.preferences).forEach(([pref, value]) => {
+        context += `- ${formatTraitName(pref)}: ${value}\n`
+      })
+    }
+
+    // Add knowledge areas if they exist
+    if (userProfile.knowledgeAreas && userProfile.knowledgeAreas.length > 0) {
+      context += `\n### Knowledge Areas:\n`
+      userProfile.knowledgeAreas.forEach((area: string) => {
+        context += `- ${area}\n`
+      })
+    }
+
+    // Add recent conversations for context
+    if (userProfile.interactions?.recentQueries && userProfile.interactions.recentQueries.length > 0) {
+      context += `\n### Recent Topics:\n`
+      userProfile.interactions.recentQueries.slice(0, 5).forEach((query: any) => {
+        const queryTime = new Date(query.timestamp)
+        const timeSince = formatTimeSince(queryTime, now)
+        context += `- ${timeSince}: "${query.content}"\n`
+      })
+    }
+
+    // Add common topics if they exist
+    if (userProfile.interactions?.commonTopics && userProfile.interactions.commonTopics.length > 0) {
+      context += `\n### Common Topics:\n`
+      userProfile.interactions.commonTopics.forEach((topic: string) => {
+        context += `- ${topic}\n`
+      })
+    }
+
+    context += `\nUse this information to provide more personalized assistance. However, only reference this information when relevant to the current conversation. Don't explicitly mention that you know these details about them unless they ask.`
+
+    return context
+  } catch (error) {
+    console.error("Error generating user profile context:", error)
+    return "" // Return empty string if error
+  }
+}
+
+// Helper function to format trait names for display
+function formatTraitName(trait: string): string {
+  return trait
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (str) => str.toUpperCase())
+    .trim()
+}
+
+// Helper function to format time since
+function formatTimeSince(past: Date, now: Date): string {
+  const diffMs = now.getTime() - past.getTime()
+  const diffSecs = Math.floor(diffMs / 1000)
+  const diffMins = Math.floor(diffSecs / 60)
+  const diffHours = Math.floor(diffMins / 60)
+  const diffDays = Math.floor(diffHours / 24)
+
+  if (diffDays > 0) {
+    return diffDays === 1 ? "yesterday" : `${diffDays} days ago`
+  } else if (diffHours > 0) {
+    return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`
+  } else if (diffMins > 0) {
+    return `${diffMins} minute${diffMins === 1 ? "" : "s"} ago`
+  } else {
+    return "just now"
   }
 }

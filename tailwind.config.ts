@@ -1,6 +1,6 @@
 import type { Config } from "tailwindcss"
 
-const config: Config = {
+const config = {
   darkMode: ["class"],
   content: [
     "./pages/**/*.{ts,tsx}",
@@ -9,6 +9,7 @@ const config: Config = {
     "./src/**/*.{ts,tsx}",
     "*.{js,ts,jsx,tsx,mdx}",
   ],
+  prefix: "",
   theme: {
     container: {
       center: true,
@@ -25,7 +26,7 @@ const config: Config = {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         primary: {
-          DEFAULT: "hsl(var(--primary))",
+          DEFAULT: "#2563eb", // Blue as default
           foreground: "hsl(var(--primary-foreground))",
         },
         secondary: {
@@ -72,54 +73,9 @@ const config: Config = {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
       },
-      typography: {
-        DEFAULT: {
-          css: {
-            maxWidth: "100%",
-            color: "hsl(var(--foreground))",
-            a: {
-              color: "hsl(var(--primary))",
-              "&:hover": {
-                color: "hsl(var(--primary))",
-              },
-            },
-            h1: {
-              color: "hsl(var(--foreground))",
-            },
-            h2: {
-              color: "hsl(var(--foreground))",
-            },
-            h3: {
-              color: "hsl(var(--foreground))",
-            },
-            h4: {
-              color: "hsl(var(--foreground))",
-            },
-            h5: {
-              color: "hsl(var(--foreground))",
-            },
-            h6: {
-              color: "hsl(var(--foreground))",
-            },
-            strong: {
-              color: "hsl(var(--foreground))",
-            },
-            code: {
-              color: "hsl(var(--foreground))",
-            },
-            figcaption: {
-              color: "hsl(var(--muted-foreground))",
-            },
-            blockquote: {
-              color: "hsl(var(--muted-foreground))",
-              borderLeftColor: "hsl(var(--border))",
-            },
-          },
-        },
-      },
     },
   },
-  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
-}
+  plugins: [require("tailwindcss-animate")],
+} satisfies Config
 
 export default config

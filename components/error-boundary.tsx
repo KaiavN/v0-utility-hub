@@ -24,7 +24,13 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    console.error("Error caught by ErrorBoundary:", error, errorInfo)
+    console.error("Error caught by ErrorBoundary:", error)
+    console.error("Component stack:", errorInfo.componentStack)
+
+    // Log additional details that might help debugging
+    if (error.message.includes("does not provide an export")) {
+      console.error("This is likely a missing or incorrect import. Check your type imports.")
+    }
   }
 
   render() {

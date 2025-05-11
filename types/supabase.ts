@@ -8,42 +8,54 @@ export interface Database {
           id: string
           email: string
           display_name: string
-          created_at: string
-          updated_at: string | null
+          username: string | null
           avatar_url: string | null
+          bio: string | null
+          role: string | null
+          created_at: string
+          updated_at: string
         }
         Insert: {
           id: string
           email: string
           display_name: string
-          created_at?: string
-          updated_at?: string | null
+          username?: string | null
           avatar_url?: string | null
+          bio?: string | null
+          role?: string | null
+          created_at?: string
+          updated_at?: string
         }
         Update: {
           id?: string
           email?: string
           display_name?: string
-          created_at?: string
-          updated_at?: string | null
+          username?: string | null
           avatar_url?: string | null
+          bio?: string | null
+          role?: string | null
+          created_at?: string
+          updated_at?: string
         }
       }
       conversations: {
         Row: {
           id: string
+          title: string | null
           created_at: string
-          updated_at: string | null
+          updated_at: string
         }
         Insert: {
           id?: string
+          title?: string | null
           created_at?: string
-          updated_at?: string | null
+          updated_at?: string
         }
         Update: {
           id?: string
+          title?: string | null
           created_at?: string
-          updated_at?: string | null
+          updated_at?: string
         }
       }
       conversation_participants: {
@@ -89,6 +101,32 @@ export interface Database {
           sender_id?: string
           content?: string
           read?: boolean
+          created_at?: string
+        }
+      }
+      achievements: {
+        Row: {
+          id: string
+          name: string
+          description: string
+          icon: string
+          points: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          description: string
+          icon: string
+          points: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          description?: string
+          icon?: string
+          points?: number
           created_at?: string
         }
       }

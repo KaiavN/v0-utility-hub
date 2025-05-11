@@ -1,99 +1,111 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { createClient } from "@supabase/supabase-js"
-import { Loader2 } from "lucide-react"
+import { toast } from "@/components/ui/use-toast"
 
 export default function AuthCallbackPage() {
+  const [message, setMessage] = useState("Processing authentication...")
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const [error, setError] = useState<string | null>(null)
-  const [debugInfo, setDebugInfo] = useState<string | null>(null)
 
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Get the code from the URL
-        const code = searchParams.get("code")
-        const errorParam = searchParams.get("error")
-        const errorDescription = searchParams.get("error_description")
-
-        if (errorParam) {
-          setError(`${errorParam}: ${errorDescription || "Unknown error"}`)
-          return
-        }
-
-        if (!code) {
-          setError("No authentication code found")
-          return
-        }
-
         // Create a Supabase client
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
         const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
+        if (!supabaseUrl || !supabaseAnonKey) {
+          throw new Error("Missing Supabase environment variables")
+        }
+
         const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-        // Exchange the code for a session
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+        // Get the auth code from the URL
+        const hashParams = new URLSearchParams(window.location.hash.substring(1))
+        const queryParams = new URLSearchParams(window.location.search)
+
+        // Check for errors
+        const error = hashParams.get("error") || queryParams.get("error")
+        const errorDescription = hashParams.get("error_description") || queryParams.get("error_description")
 
         if (error) {
-          console.error("Error processing auth callback:", error)
-          setError(error.message)
-          setDebugInfo(JSON.stringify({ error, code }, null, 2))
+          console.error("Auth callback error:", error, errorDescription)
+          setMessage(`Authentication failed: ${errorDescription || error}`)
+          toast({
+            title: "Authentication Failed",
+            description: errorDescription || "An error occurred during authentication",
+            variant: "destructive",
+          })
+
+          // Redirect to home after a delay
+          setTimeout(() => {
+            router.push("/")
+          }, 3000)
+
           return
         }
 
-        if (!data.session) {
-          setError("No session returned from authentication")
+        // Exchange the code for a session
+        const { error: sessionError } = await supabase.auth.getSession()
+
+        if (sessionError) {
+          console.error("Session error:", sessionError)
+          setMessage("Failed to get session. Please try again.")
+          toast({
+            title: "Authentication Failed",
+            description: "Failed to establish a session. Please try again.",
+            variant: "destructive",
+          })
+
+          // Redirect to home after a delay
+          setTimeout(() => {
+            router.push("/")
+          }, 3000)
+
           return
         }
 
-        // Check if we have a redirect path stored
-        let redirectPath = "/"
+        // Success! Get the redirect path from session storage or default to home
+        const redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
+        sessionStorage.removeItem("redirectAfterLogin")
 
-        if (typeof window !== "undefined") {
-          const storedPath = sessionStorage.getItem("redirectAfterLogin")
-          if (storedPath) {
-            redirectPath = storedPath
-            sessionStorage.removeItem("redirectAfterLogin")
-          }
-        }
+        setMessage("Authentication successful! Redirecting...")
+        toast({
+          title: "Authentication Successful",
+          description: "You have been successfully authenticated",
+        })
 
-        // Redirect to the stored path or home page
+        // Redirect to the original page or home
         router.push(redirectPath)
-      } catch (error: any) {
-        console.error("Unexpected error in auth callback:", error)
-        setError(error.message || "An unexpected error occurred")
-        setDebugInfo(JSON.stringify(error, null, 2))
-        setTimeout(() => router.push("/"), 5000)
+      } catch (error) {
+        console.error("Auth callback unexpected error:", error)
+        setMessage("An unexpected error occurred. Please try again.")
+        toast({
+          title: "Authentication Failed",
+          description: "An unexpected error occurred during authentication",
+          variant: "destructive",
+        })
+
+        // Redirect to home after a delay
+        setTimeout(() => {
+          router.push("/")
+        }, 3000)
       }
     }
 
     handleCallback()
-  }, [router, searchParams])
+  }, [router])
 
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="text-center max-w-md p-6 bg-card rounded-lg shadow-lg">
-        {error ? (
-          <>
-            <h1 className="text-2xl font-bold mb-4 text-red-500">Authentication Error</h1>
-            <p className="text-muted-foreground mb-4">{error}</p>
-            {debugInfo && (
-              <div className="mb-4 p-2 bg-muted rounded text-left overflow-auto max-h-40 text-xs">
-                <pre>{debugInfo}</pre>
-              </div>
-            )}
-            <p>Redirecting you to the home page in 5 seconds...</p>
-          </>
-        ) : (
-          <>
-            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
-            <h1 className="text-2xl font-bold mb-4">Completing login...</h1>
-            <p className="text-muted-foreground">Please wait while we complete your authentication.</p>
-          </>
-        )}
+    <div className="flex min-h-screen flex-col items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-lg border bg-card p-8 shadow-lg">
+        <h1 className="mb-4 text-2xl font-bold">Authentication</h1>
+        <p className="text-muted-foreground">{message}</p>
+        <div className="mt-4 flex justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-t-2 border-primary"></div>
+        </div>
       </div>
     </div>
   )

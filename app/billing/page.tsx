@@ -22,6 +22,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 
+// Add imports for linked items components at the top of the file
+import { LinkedItemsList } from "@/components/linked-items/linked-items-list"
+import { LinkItemDialog } from "@/components/linked-items/link-item-dialog"
+
 // Types
 interface TimeEntry {
   id: string
@@ -830,6 +834,26 @@ export default function BillingPage() {
                               <p className="text-sm">{invoice.notes}</p>
                             </div>
                           )}
+                          <div className="mt-4 border-t pt-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="text-sm font-medium text-muted-foreground">Linked Items</h3>
+                              <LinkItemDialog
+                                sourceId={invoice.id}
+                                sourceType="billing"
+                                onLinkAdded={() => {
+                                  // Force refresh
+                                  const updatedInvoices = [...invoices]
+                                  setInvoices(updatedInvoices)
+                                }}
+                              />
+                            </div>
+                            <LinkedItemsList
+                              sourceId={invoice.id}
+                              sourceType="billing"
+                              showEmpty={false}
+                              maxItems={3}
+                            />
+                          </div>
                         </CardContent>
                         <CardFooter className="flex justify-between">
                           <div className="text-sm text-muted-foreground">Created: {formatDate(invoice.createdAt)}</div>

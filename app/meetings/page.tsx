@@ -22,6 +22,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 
+import { LinkedItemsList } from "@/components/linked-items/linked-items-list"
+import { LinkItemDialog } from "@/components/linked-items/link-item-dialog"
+
 // Types
 interface ActionItem {
   id: string
@@ -1053,6 +1056,32 @@ export default function MeetingsPage() {
                                   ? activeMeeting.participants.join(", ")
                                   : "No participants specified"}
                               </p>
+                            )}
+                          </div>
+
+                          <div className="space-y-4 mt-6">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="text-sm font-medium text-muted-foreground">Linked Items</h3>
+                              {activeMeeting && (
+                                <LinkItemDialog
+                                  sourceId={activeMeeting.id}
+                                  sourceType="meeting"
+                                  onLinkAdded={() => {
+                                    // Force refresh
+                                    const updatedMeetings = [...meetings]
+                                    setMeetings(updatedMeetings)
+                                  }}
+                                />
+                              )}
+                            </div>
+                            {activeMeeting && (
+                              <LinkedItemsList
+                                sourceId={activeMeeting.id}
+                                sourceType="meeting"
+                                showEmpty={true}
+                                maxItems={5}
+                                emptyMessage="No items linked to this meeting yet. Link clients, projects, documents, or other related items."
+                              />
                             )}
                           </div>
                         </div>

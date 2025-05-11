@@ -3,10 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useState, useEffect, useCallback } from "react"
 import { Gantt } from "@/components/gantt/gantt"
-import { Button } from "@/components/ui/button"
-import { Plus, Settings, ImportIcon as FileImport, FileOutputIcon as FileExport } from "lucide-react"
 import type { Task, Link, Project, Section } from "@/lib/gantt-types"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import AddProjectDialog from "@/components/dialog/add-project-dialog"
 import { v4 as uuidv4 } from "uuid"
 import { toast } from "@/hooks/use-toast"
@@ -14,6 +11,7 @@ import { getLocalStorage, setLocalStorage } from "@/lib/local-storage"
 import { GanttSettingsDialog, type GanttSettings } from "@/components/gantt/settings-dialog"
 // Import the validation function
 import { validateGanttData } from "@/lib/data-validation"
+import { FeatureIntroduction } from "@/components/onboarding/feature-introduction"
 
 const STORAGE_KEY = "ganttData"
 const SETTINGS_KEY = "ganttSettings"
@@ -424,59 +422,23 @@ export default function GanttChartPage() {
   }, [activeTab, projects, dataLoaded, filterProjectsByTab])
 
   return (
-    <div className="h-screen flex flex-col bg-background">
-      <header className="border-b bg-card">
-        <div className="container mx-auto py-4 px-4">
-          <div className="flex flex-col space-y-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <h1 className="text-3xl font-bold leading-tight">Project Management</h1>
-                <p className="text-sm text-muted-foreground mt-1">Manage your projects, tasks, and timelines</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handleImport} className="gap-1">
-                  <FileImport className="h-4 w-4" />
-                  <span className="hidden sm:inline">Import</span>
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleExport} className="gap-1">
-                  <FileExport className="h-4 w-4" />
-                  <span className="hidden sm:inline">Export</span>
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleSettings} className="gap-1">
-                  <Settings className="h-4 w-4" />
-                  <span className="hidden sm:inline">Settings</span>
-                </Button>
-                <Button onClick={() => setAddProjectDialogOpen(true)} size="sm" className="gap-1">
-                  <Plus className="h-4 w-4" />
-                  <span>New Project</span>
-                </Button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <Tabs defaultValue={activeTab} onValueChange={filterProjectsByTab} className="w-full max-w-md">
-                <TabsList className="grid grid-cols-4 w-full">
-                  <TabsTrigger value="all">All Projects</TabsTrigger>
-                  <TabsTrigger value="active">Active</TabsTrigger>
-                  <TabsTrigger value="completed">Completed</TabsTrigger>
-                  <TabsTrigger value="archived">Archived</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-hidden">
-        {dataLoaded && (
-          <Gantt
-            tasks={tasks}
-            links={links}
-            projects={filteredProjects}
-            sections={sections}
-            onUpdateData={handleUpdateData}
-          />
-        )}
+    <div className="container py-6">
+      <div className="mb-4">
+        <FeatureIntroduction
+          featureId="gantt-chart"
+          title="Welcome to the Gantt Chart Tool"
+          description="Visualize project timelines, manage tasks, and track dependencies with our interactive Gantt chart."
+          tutorialId="gantt-chart"
+          className="mb-4"
+        />
       </div>
+      <Gantt
+        tasks={tasks}
+        links={links}
+        projects={filteredProjects}
+        sections={sections}
+        onUpdateData={handleUpdateData}
+      />
 
       <GanttSettingsDialog
         open={settingsDialogOpen}

@@ -35,6 +35,7 @@ const themeColors = [
 
 interface GlobalSettingsProps {
   onSettingsUpdate: (settings: any) => void
+  className?: string
 }
 
 // Function to shade a color (from stackoverflow)
@@ -63,7 +64,7 @@ function shadeColor(color: string, percent: number) {
   }
 }
 
-export function GlobalSettings({ onSettingsUpdate }: GlobalSettingsProps) {
+export function GlobalSettings({ onSettingsUpdate, className }: GlobalSettingsProps) {
   const { setTheme } = useTheme()
   const [themeColor, setThemeColor] = useState<string>("blue") // Default to blue
   const [fontSize, setFontSize] = useState<number>(100)
@@ -219,7 +220,7 @@ export function GlobalSettings({ onSettingsUpdate }: GlobalSettingsProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="Settings">
+        <Button variant="ghost" size="icon" aria-label="Settings" className={className}>
           <Settings className="h-5 w-5" />
           <span className="sr-only">Settings</span>
         </Button>

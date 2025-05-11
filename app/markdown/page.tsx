@@ -14,6 +14,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import ReactMarkdown from "react-markdown"
 import { useToast } from "@/components/ui/use-toast"
+import { LinkedItemsList } from "@/components/linked-items/linked-items-list"
+import { LinkItemDialog } from "@/components/linked-items/link-item-dialog"
 
 interface MarkdownDocument {
   id: string
@@ -511,6 +513,22 @@ export default function MarkdownPage() {
                       </ScrollArea>
                     </TabsContent>
                   </Tabs>
+                  {currentDocId && (
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-sm font-medium">Linked Items</h3>
+                        <LinkItemDialog
+                          sourceId={currentDocId}
+                          sourceType="document"
+                          onLinkAdded={() => {
+                            // Force refresh
+                            setDocuments([...documents])
+                          }}
+                        />
+                      </div>
+                      <LinkedItemsList sourceId={currentDocId} sourceType="document" showEmpty={false} maxItems={3} />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-[calc(100vh-300px)]">

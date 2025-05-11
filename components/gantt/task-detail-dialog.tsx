@@ -1,28 +1,23 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { X, Calendar, AlignLeft, Users, CheckSquare, Folder, Layers, Clock, Tag } from "lucide-react"
+import { useState, useEffect } from "react"
+import { format } from "date-fns"
+import { CalendarIcon, Clock, CheckCircle2, AlertCircle, LinkIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
+import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar as CalendarComponent } from "@/components/ui/calendar"
-import { format } from "date-fns"
-import type { Task, Project, Section, User } from "@/lib/gantt-types"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { cn } from "@/lib/utils"
+import type { Task, Project, Section } from "@/lib/gantt-types"
+
+// Add imports for linked items components
+import { LinkedItemsList } from "@/components/linked-items/linked-items-list"
+import { LinkItemDialog } from "@/components/linked-items/link-item-dialog"
 
 interface TaskDetailDialogProps {
   open: boolean
@@ -30,9 +25,10 @@ interface TaskDetailDialogProps {
   task: Task
   projects: Project[]
   sections: Section[]
-  users: User[]
+  users: any[]
   onUpdateTask: (task: Partial<Task>) => void
   onDeleteTask: (taskId: string) => void
+  isMobile?: boolean
 }
 
 export default function TaskDetailDialog({
@@ -44,486 +40,519 @@ export default function TaskDetailDialog({
   users,
   onUpdateTask,
   onDeleteTask,
+  isMobile = false,
 }: TaskDetailDialogProps) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [editedTask, setEditedTask] = useState<Partial<Task>>(task)
+  const [name, setName] = useState(task.name)
+  const [description, setDescription] = useState(task.description || "")
+  const [startDate, setStartDate] = useState<Date>(new Date(task.start))
+  const [endDate, setEndDate] = useState<Date>(new Date(task.end))
+  const [progress, setProgress] = useState(task.progress)
+  const [status, setStatus] = useState(task.status)
+  const [priority, setPriority] = useState(task.priority)
+  const [projectId, setProjectId] = useState(task.projectId || "")
+  const [sectionId, setSectionId] = useState(task.sectionId || "")
+  const [assignees, setAssignees] = useState<string[]>(task.assignees || [])
   const [startDateOpen, setStartDateOpen] = useState(false)
   const [endDateOpen, setEndDateOpen] = useState(false)
-  const [progressValue, setProgressValue] = useState(task.progress)
+  const [activeTab, setActiveTab] = useState("details")
+  const [setTask, _setTask] = useState<Task>(task)
 
+  // Reset form when task changes
   useEffect(() => {
-    // Reset edited task when a new task is selected or dialog opens
-    if (open) {
-      setEditedTask(task)
-      setProgressValue(task.progress)
-      setIsEditing(false)
-    }
-  }, [task, open])
+    setName(task.name)
+    setDescription(task.description || "")
+    setStartDate(new Date(task.start))
+    setEndDate(new Date(task.end))
+    setProgress(task.progress)
+    setStatus(task.status)
+    setPriority(task.priority)
+    setProjectId(task.projectId || "")
+    setSectionId(task.sectionId || "")
+    setAssignees(task.assignees || [])
+  }, [task])
 
-  useEffect(() => {
-    // Reset edited task when dialog closes
-    if (!open) {
-      setEditedTask(task)
-      setProgressValue(task.progress)
-      setIsEditing(false)
-      setStartDateOpen(false)
-      setEndDateOpen(false)
-    }
-  }, [open, task])
+  // Filter sections based on selected project
+  const filteredSections = sections.filter((section) => section.projectId === projectId)
 
-  const project = projects.find((p) => p.id === task.projectId)
-  const section = sections.find((s) => s.id === task.sectionId)
-  const assignedUsers = users.filter((user) => task.assignees?.includes(user.id))
-
-  const handleInputChange = (field: keyof Task, value: any) => {
-    setEditedTask((prev) => ({
-      ...prev,
-      [field]: value,
-    }))
-  }
-
-  const handleProgressChange = (value: number[]) => {
-    const newProgress = value[0]
-    setProgressValue(newProgress)
-
-    // Update the task immediately without requiring edit mode
-    if (!isEditing) {
-      onUpdateTask({
-        id: task.id,
-        progress: newProgress,
-      })
-    } else {
-      handleInputChange("progress", newProgress)
-    }
-  }
-
+  // Handle save
   const handleSave = () => {
     onUpdateTask({
-      ...editedTask,
-      id: task.id, // Ensure the ID is included
+      id: task.id,
+      name,
+      description,
+      start: startDate,
+      end: endDate,
+      progress,
+      status,
+      priority,
+      projectId: projectId || undefined,
+      sectionId: sectionId || undefined,
+      assignees,
     })
-    setIsEditing(false)
+    onOpenChange(false)
   }
 
-  const handleCancel = () => {
-    setEditedTask(task)
-    setProgressValue(task.progress)
-    setIsEditing(false)
+  // Handle delete
+  const handleDelete = () => {
+    if (confirm("Are you sure you want to delete this task?")) {
+      onDeleteTask(task.id)
+    }
   }
 
-  // Memoized date selection handlers to prevent unnecessary re-renders
-  const handleStartDateSelect = useCallback(
-    (date: Date | undefined) => {
-      if (date) {
-        handleInputChange("start", date)
-        // Use setTimeout to ensure the state update happens before closing the popover
-        setTimeout(() => setStartDateOpen(false), 0)
+  // Toggle assignee
+  const toggleAssignee = (userId: string) => {
+    setAssignees((prev) => {
+      if (prev.includes(userId)) {
+        return prev.filter((id) => id !== userId)
+      } else {
+        return [...prev, userId]
       }
-    },
-    [handleInputChange, setStartDateOpen],
-  )
+    })
+  }
 
-  const handleEndDateSelect = useCallback(
-    (date: Date | undefined) => {
-      if (date) {
-        handleInputChange("end", date)
-        // Use setTimeout to ensure the state update happens before closing the popover
-        setTimeout(() => setEndDateOpen(false), 0)
-      }
-    },
-    [handleInputChange, setEndDateOpen],
-  )
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
+  // Get status icon
+  const getStatusIcon = (statusValue: string) => {
+    switch (statusValue) {
       case "todo":
-        return "bg-gray-500/10 text-gray-700 border-gray-300"
+        return <AlertCircle className="h-4 w-4 text-muted-foreground" />
       case "in-progress":
-        return "bg-blue-500/10 text-blue-700 border-blue-300"
+        return <Clock className="h-4 w-4 text-blue-500" />
       case "review":
-        return "bg-yellow-500/10 text-yellow-700 border-yellow-300"
+        return <AlertCircle className="h-4 w-4 text-amber-500" />
       case "done":
-        return "bg-green-500/10 text-green-700 border-green-300"
+        return <CheckCircle2 className="h-4 w-4 text-green-500" />
       default:
-        return ""
+        return null
     }
   }
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case "low":
-        return "bg-green-500/10 text-green-700 border-green-300"
-      case "medium":
-        return "bg-yellow-500/10 text-yellow-700 border-yellow-300"
-      case "high":
-        return "bg-red-500/10 text-red-700 border-red-300"
-      default:
-        return ""
-    }
+  // Render mobile view
+  const renderMobileView = () => {
+    return (
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid grid-cols-3 mb-4">
+          <TabsTrigger value="details">Details</TabsTrigger>
+          <TabsTrigger value="dates">Dates</TabsTrigger>
+          <TabsTrigger value="assignees">Assignees</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="details" className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">Task Name</Label>
+            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="description">Description</Label>
+            <Textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Status</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {["todo", "in-progress", "review", "done"].map((statusValue) => (
+                <Button
+                  key={statusValue}
+                  type="button"
+                  variant={status === statusValue ? "default" : "outline"}
+                  className="justify-start"
+                  onClick={() => setStatus(statusValue as Task["status"])}
+                >
+                  <div className="flex items-center gap-2">
+                    {getStatusIcon(statusValue)}
+                    <span className="capitalize">{statusValue.replace("-", " ")}</span>
+                  </div>
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Priority</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {["low", "medium", "high"].map((priorityValue) => (
+                <Button
+                  key={priorityValue}
+                  type="button"
+                  variant={priority === priorityValue ? "default" : "outline"}
+                  onClick={() => setPriority(priorityValue as Task["priority"])}
+                >
+                  <span className="capitalize">{priorityValue}</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Progress ({progress}%)</Label>
+            <Slider value={[progress]} min={0} max={100} step={5} onValueChange={(value) => setProgress(value[0])} />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="dates" className="space-y-4">
+          <div className="space-y-2">
+            <Label>Project</Label>
+            <select
+              className="w-full p-2 border rounded-md"
+              value={projectId}
+              onChange={(e) => {
+                setProjectId(e.target.value)
+                setSectionId("")
+              }}
+            >
+              <option value="">No Project</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {projectId && (
+            <div className="space-y-2">
+              <Label>Section</Label>
+              <select
+                className="w-full p-2 border rounded-md"
+                value={sectionId}
+                onChange={(e) => setSectionId(e.target.value)}
+              >
+                <option value="">No Section</option>
+                {filteredSections.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label>Start Date</Label>
+            <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-start text-left">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {format(startDate, "PPP")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar
+                  mode="single"
+                  selected={startDate}
+                  onSelect={(date) => {
+                    if (date) {
+                      setStartDate(date)
+                      setStartDateOpen(false)
+                    }
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="space-y-2">
+            <Label>End Date</Label>
+            <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-start text-left">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {format(endDate, "PPP")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar
+                  mode="single"
+                  selected={endDate}
+                  onSelect={(date) => {
+                    if (date) {
+                      setEndDate(date)
+                      setEndDateOpen(false)
+                    }
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="assignees" className="space-y-4">
+          <div className="space-y-2">
+            <Label>Assignees</Label>
+            <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto">
+              {users.map((user) => (
+                <div
+                  key={user.id}
+                  className={cn(
+                    "flex items-center gap-2 p-2 rounded-md cursor-pointer",
+                    assignees.includes(user.id) ? "bg-primary/10 border-primary" : "bg-background border",
+                  )}
+                  onClick={() => toggleAssignee(user.id)}
+                >
+                  <Avatar className="h-8 w-8">
+                    {user.avatar && <AvatarImage src={user.avatar || "/placeholder.svg"} alt={user.name} />}
+                    <AvatarFallback>
+                      {user.name
+                        .split(" ")
+                        .map((n: string) => n[0])
+                        .join("")}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span>{user.name}</span>
+                  {assignees.includes(user.id) && <CheckCircle2 className="h-4 w-4 ml-auto text-primary" />}
+                </div>
+              ))}
+              {users.length === 0 && <p className="text-muted-foreground">No team members available</p>}
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+    )
+  }
+
+  // Render desktop view
+  const renderDesktopView = () => {
+    return (
+      <div className="grid grid-cols-2 gap-6">
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">Task Name</Label>
+            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="description">Description</Label>
+            <Textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Status</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {["todo", "in-progress", "review", "done"].map((statusValue) => (
+                <Button
+                  key={statusValue}
+                  type="button"
+                  variant={status === statusValue ? "default" : "outline"}
+                  className="justify-start"
+                  onClick={() => setStatus(statusValue as Task["status"])}
+                >
+                  <div className="flex items-center gap-2">
+                    {getStatusIcon(statusValue)}
+                    <span className="capitalize">{statusValue.replace("-", " ")}</span>
+                  </div>
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Priority</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {["low", "medium", "high"].map((priorityValue) => (
+                <Button
+                  key={priorityValue}
+                  type="button"
+                  variant={priority === priorityValue ? "default" : "outline"}
+                  onClick={() => setPriority(priorityValue as Task["priority"])}
+                >
+                  <span className="capitalize">{priorityValue}</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Progress ({progress}%)</Label>
+            <Slider value={[progress]} min={0} max={100} step={5} onValueChange={(value) => setProgress(value[0])} />
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Project</Label>
+            <select
+              className="w-full p-2 border rounded-md"
+              value={projectId}
+              onChange={(e) => {
+                setProjectId(e.target.value)
+                setSectionId("")
+              }}
+            >
+              <option value="">No Project</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {projectId && (
+            <div className="space-y-2">
+              <Label>Section</Label>
+              <select
+                className="w-full p-2 border rounded-md"
+                value={sectionId}
+                onChange={(e) => setSectionId(e.target.value)}
+              >
+                <option value="">No Section</option>
+                {filteredSections.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label>Start Date</Label>
+            <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-start text-left">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {format(startDate, "PPP")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar
+                  mode="single"
+                  selected={startDate}
+                  onSelect={(date) => {
+                    if (date) {
+                      setStartDate(date)
+                      setStartDateOpen(false)
+                    }
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="space-y-2">
+            <Label>End Date</Label>
+            <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-start text-left">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {format(endDate, "PPP")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar
+                  mode="single"
+                  selected={endDate}
+                  onSelect={(date) => {
+                    if (date) {
+                      setEndDate(date)
+                      setEndDateOpen(false)
+                    }
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Assignees</Label>
+            <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto">
+              {users.map((user) => (
+                <div
+                  key={user.id}
+                  className={cn(
+                    "flex items-center gap-2 p-2 rounded-md cursor-pointer",
+                    assignees.includes(user.id) ? "bg-primary/10 border-primary" : "bg-background border",
+                  )}
+                  onClick={() => toggleAssignee(user.id)}
+                >
+                  <Avatar className="h-8 w-8">
+                    {user.avatar && <AvatarImage src={user.avatar || "/placeholder.svg"} alt={user.name} />}
+                    <AvatarFallback>
+                      {user.name
+                        .split(" ")
+                        .map((n: string) => n[0])
+                        .join("")}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span>{user.name}</span>
+                  {assignees.includes(user.id) && <CheckCircle2 className="h-4 w-4 ml-auto text-primary" />}
+                </div>
+              ))}
+              {users.length === 0 && <p className="text-muted-foreground">No team members available</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(newOpen) => {
-        if (!newOpen) {
-          setIsEditing(false)
-          setStartDateOpen(false)
-          setEndDateOpen(false)
-        }
-        onOpenChange(newOpen)
-      }}
-    >
-      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <div className="flex items-center justify-between">
-            <DialogTitle className="text-xl">{isEditing ? "Edit Task" : task.name}</DialogTitle>
-            <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
-              <X className="h-4 w-4" />
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+        <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+          <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+        </div>
+
+        <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">
+          &#8203;
+        </span>
+
+        <div
+          className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-headline"
+        >
+          <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+            <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-headline">
+              Task Details
+            </h3>
+            <div className="mt-2">{isMobile ? renderMobileView() : renderDesktopView()}</div>
+            <div className="mt-4 border-t pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium">Linked Items</h3>
+                <LinkItemDialog
+                  sourceId={task.id}
+                  sourceType="ganttTask"
+                  onLinkAdded={() => {
+                    // Force refresh
+                    _setTask({ ...task })
+                  }}
+                  trigger={
+                    <Button variant="outline" size="sm">
+                      <LinkIcon className="mr-2 h-4 w-4" />
+                      Link Item
+                    </Button>
+                  }
+                />
+              </div>
+              <LinkedItemsList
+                sourceId={task.id}
+                sourceType="ganttTask"
+                showEmpty={true}
+                maxItems={5}
+                emptyMessage="No items linked to this task yet. Link clients, invoices, meetings, or other related items."
+              />
+            </div>
+          </div>
+
+          <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+            <Button variant="destructive" onClick={handleDelete} className="mt-3 w-full sm:mt-0 sm:ml-3 sm:w-auto">
+              Delete
+            </Button>
+            <Button type="button" className="mt-3 w-full sm:mt-0 sm:ml-3 sm:w-auto" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="button" className="w-full sm:w-auto" onClick={handleSave}>
+              Save
             </Button>
           </div>
-          {!isEditing && task.description && (
-            <DialogDescription className="mt-2 line-clamp-2">{task.description}</DialogDescription>
-          )}
-        </DialogHeader>
-
-        <ScrollArea className="flex-1 pr-4">
-          <div className="p-4 space-y-6">
-            {/* Task Name */}
-            <div>
-              {isEditing ? (
-                <Input
-                  value={editedTask.name || ""}
-                  onChange={(e) => handleInputChange("name", e.target.value)}
-                  className="font-semibold text-lg"
-                />
-              ) : (
-                <h1 className="font-semibold text-lg">{task.name}</h1>
-              )}
-            </div>
-
-            {/* Project & Section */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Folder className="h-4 w-4" />
-                <span>Project</span>
-              </div>
-              {isEditing ? (
-                <Select value={editedTask.projectId} onValueChange={(value) => handleInputChange("projectId", value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select project" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
-                        <div className="flex items-center">
-                          <div className="w-2 h-2 rounded-full mr-2" style={{ backgroundColor: project.color }} />
-                          {project.name}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <div className="flex items-center">
-                  {project && (
-                    <>
-                      <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: project.color }} />
-                      <span>{project.name}</span>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {(isEditing || section) && (
-                <>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground mt-4">
-                    <Layers className="h-4 w-4" />
-                    <span>Section</span>
-                  </div>
-                  {isEditing ? (
-                    <Select
-                      value={editedTask.sectionId || ""}
-                      onValueChange={(value) => handleInputChange("sectionId", value || undefined)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="No section" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="no-section">No section</SelectItem>
-                        {sections
-                          .filter((s) => s.projectId === editedTask.projectId)
-                          .map((section) => (
-                            <SelectItem key={section.id} value={section.id}>
-                              <div className="flex items-center">
-                                <div className="w-2 h-2 rounded-sm mr-2" style={{ backgroundColor: section.color }} />
-                                {section.name}
-                              </div>
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <div className="flex items-center">
-                      {section && (
-                        <>
-                          <div className="w-3 h-3 rounded-sm mr-2" style={{ backgroundColor: section.color }} />
-                          <span>{section.name}</span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            <Separator />
-
-            {/* Status & Priority */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <Clock className="h-4 w-4" />
-                  <span>Status</span>
-                </div>
-                {isEditing ? (
-                  <Select value={editedTask.status} onValueChange={(value: any) => handleInputChange("status", value)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todo">To Do</SelectItem>
-                      <SelectItem value="in-progress">In Progress</SelectItem>
-                      <SelectItem value="review">Review</SelectItem>
-                      <SelectItem value="done">Done</SelectItem>
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Badge className={getStatusColor(task.status)}>{task.status.replace("-", " ")}</Badge>
-                )}
-              </div>
-
-              <div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <Tag className="h-4 w-4" />
-                  <span>Priority</span>
-                </div>
-                {isEditing ? (
-                  <Select
-                    value={editedTask.priority}
-                    onValueChange={(value: any) => handleInputChange("priority", value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Badge className={getPriorityColor(task.priority)}>{task.priority}</Badge>
-                )}
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Dates */}
-            <div className="space-y-4">
-              <div>
-                <div className="flex items-center gap-2 mb-2 text-sm text-muted-foreground">
-                  <Calendar className="h-4 w-4" />
-                  <span>Start Date</span>
-                </div>
-                {isEditing ? (
-                  <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left font-normal">
-                        {editedTask.start ? format(new Date(editedTask.start), "PPP") : "Select start date"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start" onClick={(e) => e.stopPropagation()}>
-                      <CalendarComponent
-                        mode="single"
-                        selected={editedTask.start ? new Date(editedTask.start) : undefined}
-                        onSelect={handleStartDateSelect}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                ) : (
-                  <div className="text-sm bg-muted/30 p-2 rounded-md">
-                    {task.start ? format(new Date(task.start), "PPP") : "No start date"}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <div className="flex items-center gap-2 mb-2 text-sm text-muted-foreground">
-                  <Calendar className="h-4 w-4" />
-                  <span>End Date</span>
-                </div>
-                {isEditing ? (
-                  <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left font-normal">
-                        {editedTask.end ? format(new Date(editedTask.end), "PPP") : "Select end date"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start" onClick={(e) => e.stopPropagation()}>
-                      <CalendarComponent
-                        mode="single"
-                        selected={editedTask.end ? new Date(editedTask.end) : undefined}
-                        onSelect={handleEndDateSelect}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                ) : (
-                  <div className="text-sm bg-muted/30 p-2 rounded-md">
-                    {task.end ? format(new Date(task.end), "PPP") : "No end date"}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Progress */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckSquare className="h-4 w-4" />
-                  <span>Progress</span>
-                </div>
-                <span className="text-sm font-medium">{progressValue}%</span>
-              </div>
-              <div className="space-y-4">
-                <Slider
-                  value={[progressValue]}
-                  min={0}
-                  max={100}
-                  step={1}
-                  onValueChange={handleProgressChange}
-                  className="mb-2"
-                />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>0%</span>
-                  <span>50%</span>
-                  <span>100%</span>
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Description */}
-            <div>
-              <div className="flex items-center gap-2 mb-2 text-sm text-muted-foreground">
-                <AlignLeft className="h-4 w-4" />
-                <span>Description</span>
-              </div>
-              {isEditing ? (
-                <Textarea
-                  value={editedTask.description || ""}
-                  onChange={(e) => handleInputChange("description", e.target.value)}
-                  placeholder="Add a description..."
-                  className="min-h-[100px]"
-                />
-              ) : (
-                <div className="text-sm whitespace-pre-wrap bg-muted/30 p-3 rounded-md">
-                  {task.description || <span className="text-muted-foreground italic">No description</span>}
-                </div>
-              )}
-            </div>
-
-            <Separator />
-
-            {/* Assignees */}
-            <div>
-              <div className="flex items-center gap-2 mb-2 text-sm text-muted-foreground">
-                <Users className="h-4 w-4" />
-                <span>Assignees</span>
-              </div>
-              {isEditing ? (
-                <Select
-                  value={editedTask.assignees?.join(",") || ""}
-                  onValueChange={(value) => handleInputChange("assignees", value ? value.split(",") : [])}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Assign users" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {users.map((user) => (
-                      <SelectItem key={user.id} value={user.id}>
-                        <div className="flex items-center">
-                          <Avatar className="h-6 w-6 mr-2">
-                            <AvatarImage src={user.avatar || "/placeholder.svg"} />
-                            <AvatarFallback style={{ backgroundColor: user.color }}>
-                              {user.name.substring(0, 2).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          {user.name}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {assignedUsers.length > 0 ? (
-                    assignedUsers.map((user) => (
-                      <div key={user.id} className="flex items-center bg-muted/30 px-2 py-1 rounded-md">
-                        <Avatar className="h-6 w-6 mr-1">
-                          <AvatarImage src={user.avatar || "/placeholder.svg"} />
-                          <AvatarFallback style={{ backgroundColor: user.color }}>
-                            {user.name.substring(0, 2).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="text-sm">{user.name}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <span className="text-sm text-muted-foreground italic">No assignees</span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </ScrollArea>
-
-        <DialogFooter className="mt-4">
-          {isEditing ? (
-            <div className="flex space-x-2 w-full">
-              <Button onClick={handleCancel} className="flex-1">
-                Cancel
-              </Button>
-              <Button onClick={handleSave} className="flex-1">
-                Save Changes
-              </Button>
-            </div>
-          ) : (
-            <div className="flex space-x-2 w-full">
-              <Button onClick={() => setIsEditing(true)} className="flex-1">
-                Edit Task
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  if (confirm("Are you sure you want to delete this task?")) {
-                    onDeleteTask(task.id)
-                    onOpenChange(false)
-                  }
-                }}
-              >
-                Delete
-              </Button>
-            </div>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </div>
+    </div>
   )
 }

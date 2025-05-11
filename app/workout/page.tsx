@@ -37,6 +37,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
+import { ErrorBoundary } from "@/components/error-boundary"
 
 interface Exercise {
   id: string
@@ -158,6 +159,7 @@ export default function WorkoutPage() {
   const [isWorkoutActive, setIsWorkoutActive] = useState(false)
   const [workoutTimer, setWorkoutTimer] = useState(0)
   const [activeView, setActiveView] = useState<"calendar" | "history" | "stats">("calendar")
+  const [isLoading, setIsLoading] = useState(true)
 
   // New workout form state
   // Add recurring options to the new workout form
@@ -180,13 +182,43 @@ export default function WorkoutPage() {
 
   // Load workout history from localStorage
   useEffect(() => {
-    const savedWorkoutHistory = getLocalStorage<WorkoutHistory>("workoutHistory", initialWorkoutHistory)
-    setWorkoutHistory(savedWorkoutHistory)
+    try {
+      const savedWorkoutHistory = getLocalStorage<WorkoutHistory>("workoutHistory", initialWorkoutHistory)
 
-    // Find workout for selected date
-    const workout = savedWorkoutHistory.workouts.find((w) => w.date === selectedDate)
-    setSelectedWorkout(workout || null)
-  }, [selectedDate])
+      // Ensure the workoutHistory has all required properties
+      const validatedHistory: WorkoutHistory = {
+        workouts: Array.isArray(savedWorkoutHistory?.workouts) ? savedWorkoutHistory.workouts : [],
+        exercises: Array.isArray(savedWorkoutHistory?.exercises) ? savedWorkoutHistory.exercises : defaultExercises,
+        stats: {
+          totalWorkouts: savedWorkoutHistory?.stats?.totalWorkouts || 0,
+          totalSets: savedWorkoutHistory?.stats?.totalSets || 0,
+          totalCompletedWorkouts: savedWorkoutHistory?.stats?.totalCompletedWorkouts || 0,
+          streak: savedWorkoutHistory?.stats?.streak || 0,
+          lastWorkoutDate: savedWorkoutHistory?.stats?.lastWorkoutDate || null,
+        },
+      }
+
+      setWorkoutHistory(validatedHistory)
+
+      // Find workout for selected date
+      const workout = validatedHistory.workouts.find((w) => w.date === selectedDate)
+      setSelectedWorkout(workout || null)
+      setIsLoading(false)
+    } catch (error) {
+      console.error("Error loading workout history:", error)
+      // If there's an error, use the initial state
+      setWorkoutHistory(initialWorkoutHistory)
+      setSelectedWorkout(null)
+      setIsLoading(false)
+
+      // Show error toast
+      toast({
+        title: "Error loading workout data",
+        description: "There was a problem loading your workout history. Default data has been loaded.",
+        variant: "destructive",
+      })
+    }
+  }, [selectedDate, toast])
 
   // Timer effect for active workout
   useEffect(() => {
@@ -207,6 +239,11 @@ export default function WorkoutPage() {
 
   // Add a function to check for and create recurring workouts
   const checkAndCreateRecurringWorkouts = () => {
+    if (!workoutHistory || !Array.isArray(workoutHistory.workouts)) {
+      console.error("Invalid workout history data:", workoutHistory)
+      return
+    }
+
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
@@ -283,8 +320,37 @@ export default function WorkoutPage() {
   }
 
   const saveWorkoutHistory = (updatedHistory: WorkoutHistory) => {
-    setWorkoutHistory(updatedHistory)
-    setLocalStorage("workoutHistory", updatedHistory)
+    // Validate the history object before saving
+    if (!updatedHistory || typeof updatedHistory !== "object") {
+      console.error("Invalid workout history data:", updatedHistory)
+      return
+    }
+
+    // Ensure all required properties exist
+    const validatedHistory: WorkoutHistory = {
+      workouts: Array.isArray(updatedHistory.workouts) ? updatedHistory.workouts : [],
+      exercises: Array.isArray(updatedHistory.exercises) ? updatedHistory.exercises : defaultExercises,
+      stats: {
+        totalWorkouts: updatedHistory.stats?.totalWorkouts || 0,
+        totalSets: updatedHistory.stats?.totalSets || 0,
+        totalCompletedWorkouts: updatedHistory.stats?.totalCompletedWorkouts || 0,
+        streak: updatedHistory.stats?.streak || 0,
+        lastWorkoutDate: updatedHistory.stats?.lastWorkoutDate || null,
+      },
+    }
+
+    setWorkoutHistory(validatedHistory)
+
+    try {
+      setLocalStorage("workoutHistory", validatedHistory)
+    } catch (error) {
+      console.error("Error saving workout history:", error)
+      toast({
+        title: "Error saving data",
+        description: "There was a problem saving your workout data.",
+        variant: "destructive",
+      })
+    }
   }
 
   const addWorkout = () => {
@@ -302,6 +368,17 @@ export default function WorkoutPage() {
       id: Date.now().toString(),
       completed: false,
       sets: [],
+    }
+
+    // Ensure workoutHistory is valid before updating
+    if (!workoutHistory || !Array.isArray(workoutHistory.workouts)) {
+      console.error("Invalid workout history data:", workoutHistory)
+      toast({
+        title: "Error adding workout",
+        description: "There was a problem with your workout data.",
+        variant: "destructive",
+      })
+      return
     }
 
     const updatedWorkouts = [...workoutHistory.workouts, workout]
@@ -339,6 +416,17 @@ export default function WorkoutPage() {
   const updateWorkout = () => {
     if (!editingWorkout) return
 
+    // Ensure workoutHistory is valid before updating
+    if (!workoutHistory || !Array.isArray(workoutHistory.workouts)) {
+      console.error("Invalid workout history data:", workoutHistory)
+      toast({
+        title: "Error updating workout",
+        description: "There was a problem with your workout data.",
+        variant: "destructive",
+      })
+      return
+    }
+
     const updatedWorkouts = workoutHistory.workouts.map((workout) =>
       workout.id === editingWorkout.id ? editingWorkout : workout,
     )
@@ -362,6 +450,17 @@ export default function WorkoutPage() {
   }
 
   const deleteWorkout = (id: string) => {
+    // Ensure workoutHistory is valid before updating
+    if (!workoutHistory || !Array.isArray(workoutHistory.workouts)) {
+      console.error("Invalid workout history data:", workoutHistory)
+      toast({
+        title: "Error deleting workout",
+        description: "There was a problem with your workout data.",
+        variant: "destructive",
+      })
+      return
+    }
+
     const workoutToDelete = workoutHistory.workouts.find((w) => w.id === id)
     if (!workoutToDelete) return
 
@@ -403,6 +502,17 @@ export default function WorkoutPage() {
       return
     }
 
+    // Ensure workoutHistory is valid before updating
+    if (!workoutHistory || !Array.isArray(workoutHistory.exercises)) {
+      console.error("Invalid workout history data:", workoutHistory)
+      toast({
+        title: "Error adding exercise",
+        description: "There was a problem with your workout data.",
+        variant: "destructive",
+      })
+      return
+    }
+
     const exercise: Exercise = {
       ...newExercise,
       id: Date.now().toString(),
@@ -433,6 +543,17 @@ export default function WorkoutPage() {
 
   const addSet = (exerciseId: string) => {
     if (!selectedWorkout) return
+
+    // Ensure workoutHistory is valid before updating
+    if (!workoutHistory || !Array.isArray(workoutHistory.exercises)) {
+      console.error("Invalid workout history data:", workoutHistory)
+      toast({
+        title: "Error adding set",
+        description: "There was a problem with your workout data.",
+        variant: "destructive",
+      })
+      return
+    }
 
     const exercise = workoutHistory.exercises.find((e) => e.id === exerciseId)
     if (!exercise) return
@@ -473,6 +594,12 @@ export default function WorkoutPage() {
   }
 
   const updateSet = (workoutId: string, setId: string, updatedData: Partial<WorkoutSet>) => {
+    // Ensure workoutHistory is valid before updating
+    if (!workoutHistory || !Array.isArray(workoutHistory.workouts)) {
+      console.error("Invalid workout history data:", workoutHistory)
+      return
+    }
+
     const workout = workoutHistory.workouts.find((w) => w.id === workoutId)
     if (!workout) return
 
@@ -498,6 +625,17 @@ export default function WorkoutPage() {
   }
 
   const deleteSet = (workoutId: string, setId: string) => {
+    // Ensure workoutHistory is valid before updating
+    if (!workoutHistory || !Array.isArray(workoutHistory.workouts)) {
+      console.error("Invalid workout history data:", workoutHistory)
+      toast({
+        title: "Error deleting set",
+        description: "There was a problem with your workout data.",
+        variant: "destructive",
+      })
+      return
+    }
+
     const workout = workoutHistory.workouts.find((w) => w.id === workoutId)
     if (!workout) return
 
@@ -533,6 +671,17 @@ export default function WorkoutPage() {
 
   const completeWorkout = () => {
     if (!selectedWorkout) return
+
+    // Ensure workoutHistory is valid before updating
+    if (!workoutHistory || !workoutHistory.stats) {
+      console.error("Invalid workout history data:", workoutHistory)
+      toast({
+        title: "Error completing workout",
+        description: "There was a problem with your workout data.",
+        variant: "destructive",
+      })
+      return
+    }
 
     // Stop the timer if it's running
     setIsWorkoutActive(false)
@@ -613,21 +762,24 @@ export default function WorkoutPage() {
   }
 
   // Group exercises by category
-  const exercisesByCategory = workoutHistory.exercises.reduce(
-    (acc, exercise) => {
-      if (!acc[exercise.category]) {
-        acc[exercise.category] = []
-      }
-      acc[exercise.category].push(exercise)
-      return acc
-    },
-    {} as Record<string, Exercise[]>,
-  )
+  const exercisesByCategory =
+    workoutHistory?.exercises?.reduce(
+      (acc, exercise) => {
+        if (!acc[exercise.category]) {
+          acc[exercise.category] = []
+        }
+        acc[exercise.category].push(exercise)
+        return acc
+      },
+      {} as Record<string, Exercise[]>,
+    ) || {}
 
   // Call this function when the component mounts
   useEffect(() => {
     // Check for recurring workouts that need to be created
-    checkAndCreateRecurringWorkouts()
+    if (!isLoading) {
+      checkAndCreateRecurringWorkouts()
+    }
 
     // Set up a daily check at midnight
     const checkAtMidnight = () => {
@@ -658,752 +810,773 @@ export default function WorkoutPage() {
 
     const midnightTimeout = checkAtMidnight()
     return () => clearTimeout(midnightTimeout)
-  }, [])
+  }, [isLoading])
 
-  return (
-    <div className="container mx-auto p-6">
-      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Workout Tracker</h1>
-          <p className="text-muted-foreground">Track your fitness progress and workout routines</p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Tabs value={activeView} onValueChange={(value: "calendar" | "history" | "stats") => setActiveView(value)}>
-            <TabsList>
-              <TabsTrigger value="calendar">Calendar</TabsTrigger>
-              <TabsTrigger value="history">History</TabsTrigger>
-              <TabsTrigger value="stats">Stats</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          <Button onClick={() => setIsAddWorkoutOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Workout
-          </Button>
+  if (isLoading) {
+    return (
+      <div className="container mx-auto p-6 flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <Dumbbell className="h-12 w-12 mx-auto mb-4 animate-pulse text-primary" />
+          <h2 className="text-2xl font-bold">Loading workout data...</h2>
         </div>
       </div>
+    )
+  }
 
-      {activeView === "calendar" && (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
-          <div className="md:col-span-1">
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle>Calendar</CardTitle>
-                  <div className="flex items-center">
-                    <Button variant="ghost" size="icon" onClick={getPrevDay}>
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={getNextDay}>
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <CardDescription>{getFormattedDate(selectedDate)}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-1">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Select a date to view or add workouts</span>
-                  </div>
-
-                  <div className="pt-2">
-                    <Label htmlFor="date">Date</Label>
-                    <Input
-                      id="date"
-                      type="date"
-                      value={selectedDate}
-                      onChange={(e) => setSelectedDate(e.target.value)}
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-6 space-y-2">
-                  <h3 className="text-sm font-medium">Streak</h3>
-                  <div className="flex items-center gap-2 rounded-md border p-3">
-                    <Trophy className="h-8 w-8 text-yellow-500" />
-                    <div>
-                      <div className="text-xl font-bold">{workoutHistory.stats.streak} days</div>
-                      <div className="text-xs text-muted-foreground">Current streak</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-6 space-y-2">
-                  <h3 className="text-sm font-medium">Quick Stats</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-md border p-2 text-center">
-                      <div className="text-xl font-bold">{workoutHistory.stats.totalWorkouts}</div>
-                      <div className="text-xs text-muted-foreground">Total Workouts</div>
-                    </div>
-                    <div className="rounded-md border p-2 text-center">
-                      <div className="text-xl font-bold">{workoutHistory.stats.totalCompletedWorkouts}</div>
-                      <div className="text-xs text-muted-foreground">Completed</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-6">
-                  <Button variant="outline" className="w-full" onClick={() => setIsAddExerciseOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add New Exercise
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+  return (
+    <ErrorBoundary>
+      <div className="container mx-auto p-6">
+        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Workout Tracker</h1>
+            <p className="text-muted-foreground">Track your fitness progress and workout routines</p>
           </div>
 
-          <div className="md:col-span-3">
-            {!selectedWorkout ? (
-              <Card className="flex h-full flex-col items-center justify-center p-6 text-center">
-                <Dumbbell className="mb-4 h-16 w-16 text-muted-foreground" />
-                <h2 className="text-2xl font-bold">No Workout Planned</h2>
-                <p className="mb-6 text-muted-foreground">
-                  No workout scheduled for this date. Add a workout to get started.
-                </p>
-                <Button onClick={() => setIsAddWorkoutOpen(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Workout
-                </Button>
-              </Card>
-            ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <Tabs value={activeView} onValueChange={(value: "calendar" | "history" | "stats") => setActiveView(value)}>
+              <TabsList>
+                <TabsTrigger value="calendar">Calendar</TabsTrigger>
+                <TabsTrigger value="history">History</TabsTrigger>
+                <TabsTrigger value="stats">Stats</TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            <Button onClick={() => setIsAddWorkoutOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Workout
+            </Button>
+          </div>
+        </div>
+
+        {activeView === "calendar" && (
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
+            <div className="md:col-span-1">
               <Card>
-                <CardHeader>
+                <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <CardTitle>{selectedWorkout.name}</CardTitle>
-                        {selectedWorkout.completed && (
-                          <Badge variant="outline" className="bg-green-500 text-white">
-                            Completed
-                          </Badge>
-                        )}
-                      </div>
-                      <CardDescription>{selectedWorkout.notes || "No workout notes"}</CardDescription>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="icon" onClick={() => setEditingWorkout(selectedWorkout)}>
-                        <Edit className="h-4 w-4" />
+                    <CardTitle>Calendar</CardTitle>
+                    <div className="flex items-center">
+                      <Button variant="ghost" size="icon" onClick={getPrevDay}>
+                        <ChevronLeft className="h-4 w-4" />
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={() => deleteWorkout(selectedWorkout.id)}
-                        className="text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
+                      <Button variant="ghost" size="icon" onClick={getNextDay}>
+                        <ChevronRight className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
+                  <CardDescription>{getFormattedDate(selectedDate)}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {!selectedWorkout.completed && (
-                    <div className="mb-4 flex items-center justify-between rounded-md border p-3">
-                      <div className="flex items-center gap-2">
-                        <Timer className="h-5 w-5 text-muted-foreground" />
-                        <div>
-                          <div className="text-lg font-bold">{formatTime(workoutTimer)}</div>
-                          <div className="text-xs text-muted-foreground">Workout Duration</div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1">
+                      <Calendar className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm">Select a date to view or add workouts</span>
+                    </div>
+
+                    <div className="pt-2">
+                      <Label htmlFor="date">Date</Label>
+                      <Input
+                        id="date"
+                        type="date"
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                        className="mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-6 space-y-2">
+                    <h3 className="text-sm font-medium">Streak</h3>
+                    <div className="flex items-center gap-2 rounded-md border p-3">
+                      <Trophy className="h-8 w-8 text-yellow-500" />
+                      <div>
+                        <div className="text-xl font-bold">{workoutHistory?.stats?.streak || 0} days</div>
+                        <div className="text-xs text-muted-foreground">Current streak</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 space-y-2">
+                    <h3 className="text-sm font-medium">Quick Stats</h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-md border p-2 text-center">
+                        <div className="text-xl font-bold">{workoutHistory?.stats?.totalWorkouts || 0}</div>
+                        <div className="text-xs text-muted-foreground">Total Workouts</div>
+                      </div>
+                      <div className="rounded-md border p-2 text-center">
+                        <div className="text-xl font-bold">{workoutHistory?.stats?.totalCompletedWorkouts || 0}</div>
+                        <div className="text-xs text-muted-foreground">Completed</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <Button variant="outline" className="w-full" onClick={() => setIsAddExerciseOpen(true)}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add New Exercise
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="md:col-span-3">
+              {!selectedWorkout ? (
+                <Card className="flex h-full flex-col items-center justify-center p-6 text-center">
+                  <Dumbbell className="mb-4 h-16 w-16 text-muted-foreground" />
+                  <h2 className="text-2xl font-bold">No Workout Planned</h2>
+                  <p className="mb-6 text-muted-foreground">
+                    No workout scheduled for this date. Add a workout to get started.
+                  </p>
+                  <Button onClick={() => setIsAddWorkoutOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Workout
+                  </Button>
+                </Card>
+              ) : (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <CardTitle>{selectedWorkout.name}</CardTitle>
+                          {selectedWorkout.completed && (
+                            <Badge variant="outline" className="bg-green-500 text-white">
+                              Completed
+                            </Badge>
+                          )}
                         </div>
+                        <CardDescription>{selectedWorkout.notes || "No workout notes"}</CardDescription>
                       </div>
                       <div className="flex gap-2">
-                        {!isWorkoutActive ? (
-                          <Button variant="outline" size="sm" onClick={() => setIsWorkoutActive(true)}>
-                            <PlayCircle className="mr-2 h-4 w-4" />
-                            Start
-                          </Button>
-                        ) : (
-                          <Button variant="outline" size="sm" onClick={() => setIsWorkoutActive(false)}>
-                            <PauseCircle className="mr-2 h-4 w-4" />
-                            Pause
-                          </Button>
-                        )}
-                        <Button variant="outline" size="sm" onClick={() => setWorkoutTimer(0)}>
-                          <RotateCw className="mr-2 h-4 w-4" />
-                          Reset
+                        <Button variant="outline" size="icon" onClick={() => setEditingWorkout(selectedWorkout)}>
+                          <Edit className="h-4 w-4" />
                         </Button>
                         <Button
-                          variant="default"
-                          size="sm"
-                          onClick={completeWorkout}
-                          disabled={selectedWorkout.completed}
+                          variant="outline"
+                          size="icon"
+                          onClick={() => deleteWorkout(selectedWorkout.id)}
+                          className="text-destructive"
                         >
-                          <CheckCircle className="mr-2 h-4 w-4" />
-                          Finish
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
-                  )}
+                  </CardHeader>
+                  <CardContent>
+                    {!selectedWorkout.completed && (
+                      <div className="mb-4 flex items-center justify-between rounded-md border p-3">
+                        <div className="flex items-center gap-2">
+                          <Timer className="h-5 w-5 text-muted-foreground" />
+                          <div>
+                            <div className="text-lg font-bold">{formatTime(workoutTimer)}</div>
+                            <div className="text-xs text-muted-foreground">Workout Duration</div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          {!isWorkoutActive ? (
+                            <Button variant="outline" size="sm" onClick={() => setIsWorkoutActive(true)}>
+                              <PlayCircle className="mr-2 h-4 w-4" />
+                              Start
+                            </Button>
+                          ) : (
+                            <Button variant="outline" size="sm" onClick={() => setIsWorkoutActive(false)}>
+                              <PauseCircle className="mr-2 h-4 w-4" />
+                              Pause
+                            </Button>
+                          )}
+                          <Button variant="outline" size="sm" onClick={() => setWorkoutTimer(0)}>
+                            <RotateCw className="mr-2 h-4 w-4" />
+                            Reset
+                          </Button>
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={completeWorkout}
+                            disabled={selectedWorkout.completed}
+                          >
+                            <CheckCircle className="mr-2 h-4 w-4" />
+                            Finish
+                          </Button>
+                        </div>
+                      </div>
+                    )}
 
-                  {selectedWorkout.sets.length === 0 ? (
-                    <div className="flex h-40 flex-col items-center justify-center rounded-md border border-dashed p-6 text-center">
-                      <p className="text-muted-foreground">No exercises added to this workout yet</p>
-                      <p className="text-sm text-muted-foreground">Add exercises and sets to track your progress</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {Object.entries(exercisesByCategory).map(([category, exercises]) => {
-                        // Filter exercises used in this workout
-                        const usedExercises = exercises.filter((exercise) =>
-                          selectedWorkout.sets.some((set) => set.exerciseId === exercise.id),
-                        )
+                    {!selectedWorkout.sets || selectedWorkout.sets.length === 0 ? (
+                      <div className="flex h-40 flex-col items-center justify-center rounded-md border border-dashed p-6 text-center">
+                        <p className="text-muted-foreground">No exercises added to this workout yet</p>
+                        <p className="text-sm text-muted-foreground">Add exercises and sets to track your progress</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {Object.entries(exercisesByCategory).map(([category, exercises]) => {
+                          // Filter exercises used in this workout
+                          const usedExercises = exercises.filter((exercise) =>
+                            selectedWorkout.sets.some((set) => set.exerciseId === exercise.id),
+                          )
 
-                        if (usedExercises.length === 0) return null
+                          if (usedExercises.length === 0) return null
 
-                        return (
-                          <div key={category}>
-                            <h3 className="mb-2 font-semibold">{category}</h3>
-                            <div className="space-y-3">
-                              {usedExercises.map((exercise) => {
-                                const exerciseSets = selectedWorkout.sets.filter(
-                                  (set) => set.exerciseId === exercise.id,
-                                )
+                          return (
+                            <div key={category}>
+                              <h3 className="mb-2 font-semibold">{category}</h3>
+                              <div className="space-y-3">
+                                {usedExercises.map((exercise) => {
+                                  const exerciseSets = selectedWorkout.sets.filter(
+                                    (set) => set.exerciseId === exercise.id,
+                                  )
 
-                                if (exerciseSets.length === 0) return null
+                                  if (exerciseSets.length === 0) return null
 
-                                return (
-                                  <div key={exercise.id} className="rounded-md border">
-                                    <div className="border-b bg-muted/50 p-2">
-                                      <div className="flex items-center justify-between">
-                                        <div className="font-medium">{exercise.name}</div>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => addSet(exercise.id)}
-                                          disabled={selectedWorkout.completed}
-                                        >
-                                          <Plus className="mr-1 h-3 w-3" />
-                                          Add Set
-                                        </Button>
-                                      </div>
-                                    </div>
-                                    <div className="p-2">
-                                      <div className="grid grid-cols-12 gap-2 text-sm font-medium">
-                                        <div className="col-span-1">#</div>
-                                        <div className="col-span-3">Weight</div>
-                                        <div className="col-span-3">Reps</div>
-                                        <div className="col-span-5 text-right">Actions</div>
-                                      </div>
-                                      {exerciseSets.map((set, index) => (
-                                        <div
-                                          key={set.id}
-                                          className={`mt-1 grid grid-cols-12 gap-2 rounded-sm p-1 text-sm ${
-                                            set.completed ? "bg-muted/30" : ""
-                                          }`}
-                                        >
-                                          <div className="col-span-1 flex items-center">{index + 1}</div>
-                                          <div className="col-span-3">
-                                            <Input
-                                              type="number"
-                                              min="0"
-                                              value={set.weight}
-                                              onChange={(e) =>
-                                                updateSet(selectedWorkout.id, set.id, {
-                                                  weight: Number(e.target.value),
-                                                })
-                                              }
-                                              className="h-8"
-                                              disabled={selectedWorkout.completed || set.completed}
-                                            />
-                                          </div>
-                                          <div className="col-span-3">
-                                            <Input
-                                              type="number"
-                                              min="0"
-                                              value={set.reps}
-                                              onChange={(e) =>
-                                                updateSet(selectedWorkout.id, set.id, { reps: Number(e.target.value) })
-                                              }
-                                              className="h-8"
-                                              disabled={selectedWorkout.completed || set.completed}
-                                            />
-                                          </div>
-                                          <div className="col-span-5 flex items-center justify-end gap-1">
-                                            <Button
-                                              variant={set.completed ? "outline" : "default"}
-                                              size="sm"
-                                              className="h-8"
-                                              onClick={() =>
-                                                updateSet(selectedWorkout.id, set.id, { completed: !set.completed })
-                                              }
-                                              disabled={selectedWorkout.completed}
-                                            >
-                                              {set.completed ? "Undo" : "Complete"}
-                                            </Button>
-                                            <Button
-                                              variant="ghost"
-                                              size="icon"
-                                              className="h-8 w-8"
-                                              onClick={() => deleteSet(selectedWorkout.id, set.id)}
-                                              disabled={selectedWorkout.completed}
-                                            >
-                                              <Trash2 className="h-3 w-3" />
-                                            </Button>
-                                          </div>
+                                  return (
+                                    <div key={exercise.id} className="rounded-md border">
+                                      <div className="border-b bg-muted/50 p-2">
+                                        <div className="flex items-center justify-between">
+                                          <div className="font-medium">{exercise.name}</div>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => addSet(exercise.id)}
+                                            disabled={selectedWorkout.completed}
+                                          >
+                                            <Plus className="mr-1 h-3 w-3" />
+                                            Add Set
+                                          </Button>
                                         </div>
-                                      ))}
+                                      </div>
+                                      <div className="p-2">
+                                        <div className="grid grid-cols-12 gap-2 text-sm font-medium">
+                                          <div className="col-span-1">#</div>
+                                          <div className="col-span-3">Weight</div>
+                                          <div className="col-span-3">Reps</div>
+                                          <div className="col-span-5 text-right">Actions</div>
+                                        </div>
+                                        {exerciseSets.map((set, index) => (
+                                          <div
+                                            key={set.id}
+                                            className={`mt-1 grid grid-cols-12 gap-2 rounded-sm p-1 text-sm ${
+                                              set.completed ? "bg-muted/30" : ""
+                                            }`}
+                                          >
+                                            <div className="col-span-1 flex items-center">{index + 1}</div>
+                                            <div className="col-span-3">
+                                              <Input
+                                                type="number"
+                                                min="0"
+                                                value={set.weight}
+                                                onChange={(e) =>
+                                                  updateSet(selectedWorkout.id, set.id, {
+                                                    weight: Number(e.target.value),
+                                                  })
+                                                }
+                                                className="h-8"
+                                                disabled={selectedWorkout.completed || set.completed}
+                                              />
+                                            </div>
+                                            <div className="col-span-3">
+                                              <Input
+                                                type="number"
+                                                min="0"
+                                                value={set.reps}
+                                                onChange={(e) =>
+                                                  updateSet(selectedWorkout.id, set.id, {
+                                                    reps: Number(e.target.value),
+                                                  })
+                                                }
+                                                className="h-8"
+                                                disabled={selectedWorkout.completed || set.completed}
+                                              />
+                                            </div>
+                                            <div className="col-span-5 flex items-center justify-end gap-1">
+                                              <Button
+                                                variant={set.completed ? "outline" : "default"}
+                                                size="sm"
+                                                className="h-8"
+                                                onClick={() =>
+                                                  updateSet(selectedWorkout.id, set.id, { completed: !set.completed })
+                                                }
+                                                disabled={selectedWorkout.completed}
+                                              >
+                                                {set.completed ? "Undo" : "Complete"}
+                                              </Button>
+                                              <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8"
+                                                onClick={() => deleteSet(selectedWorkout.id, set.id)}
+                                                disabled={selectedWorkout.completed}
+                                              >
+                                                <Trash2 className="h-3 w-3" />
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
-                                  </div>
-                                )
-                              })}
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                  <CardFooter className="border-t">
+                    <div className="w-full">
+                      <div className="mb-2 flex items-center justify-between">
+                        <h3 className="text-sm font-medium">Add Exercise</h3>
+                        <Button variant="ghost" size="sm">
+                          <List className="mr-2 h-3 w-3" />
+                          View All
+                        </Button>
+                      </div>
+                      <ScrollArea className="h-24">
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                          {workoutHistory?.exercises?.map((exercise) => (
+                            <Button
+                              key={exercise.id}
+                              variant="outline"
+                              className="justify-start"
+                              onClick={() => addSet(exercise.id)}
+                              disabled={selectedWorkout.completed}
+                            >
+                              <Plus className="mr-2 h-3 w-3" />
+                              {exercise.name}
+                            </Button>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  </CardFooter>
+                </Card>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeView === "history" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Workout History</CardTitle>
+              <CardDescription>View your past workouts and progress</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!workoutHistory?.workouts || workoutHistory.workouts.length === 0 ? (
+                <div className="flex h-40 flex-col items-center justify-center rounded-md border border-dashed p-6 text-center">
+                  <Dumbbell className="mb-2 h-10 w-10 text-muted-foreground" />
+                  <p className="text-muted-foreground">No workout history yet</p>
+                  <p className="text-sm text-muted-foreground">Start tracking your workouts to build your history</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {[...workoutHistory.workouts]
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .map((workout) => (
+                      <div key={workout.id} className="rounded-md border">
+                        <div className="flex items-center justify-between border-b p-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{workout.name}</span>
+                              {workout.completed && (
+                                <Badge variant="outline" className="bg-green-500 text-white">
+                                  Completed
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-sm text-muted-foreground">{getFormattedDate(workout.date)}</div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedWorkout(workout)
+                                setSelectedDate(workout.date)
+                                setActiveView("calendar")
+                              }}
+                            >
+                              View
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => deleteWorkout(workout.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="p-3">
+                          <div className="mb-2 grid grid-cols-3 gap-2 text-center">
+                            <div className="rounded-md bg-muted p-2">
+                              <div className="text-sm text-muted-foreground">Sets</div>
+                              <div className="font-medium">{workout.sets?.length || 0}</div>
+                            </div>
+                            <div className="rounded-md bg-muted p-2">
+                              <div className="text-sm text-muted-foreground">Exercises</div>
+                              <div className="font-medium">
+                                {workout.sets ? new Set(workout.sets.map((set) => set.exerciseId)).size : 0}
+                              </div>
+                            </div>
+                            <div className="rounded-md bg-muted p-2">
+                              <div className="text-sm text-muted-foreground">Duration</div>
+                              <div className="font-medium">
+                                {workout.duration ? formatTime(workout.duration) : "N/A"}
+                              </div>
                             </div>
                           </div>
-                        )
-                      })}
+
+                          <div className="text-sm">
+                            {workout.notes && (
+                              <div className="mt-2 rounded-md bg-muted p-2">
+                                <div className="font-medium">Notes:</div>
+                                <div className="text-muted-foreground">{workout.notes}</div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {activeView === "stats" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Statistics</CardTitle>
+              <CardDescription>Track your overall progress and achievements</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Total Workouts</CardTitle>
+                    <CardDescription>Number of workouts completed</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-3xl font-bold">{workoutHistory?.stats?.totalWorkouts || 0}</div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Total Sets</CardTitle>
+                    <CardDescription>Number of sets performed</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-3xl font-bold">{workoutHistory?.stats?.totalSets || 0}</div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Completed Workouts</CardTitle>
+                    <CardDescription>Workouts marked as complete</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-3xl font-bold">{workoutHistory?.stats?.totalCompletedWorkouts || 0}</div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Workout Streak</CardTitle>
+                  <CardDescription>Your current workout streak</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-4">
+                    <Trophy className="h-8 w-8 text-yellow-500" />
+                    <div>
+                      <div className="text-3xl font-bold">{workoutHistory?.stats?.streak || 0} days</div>
+                      <div className="text-sm text-muted-foreground">Keep up the good work!</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Last Workout</CardTitle>
+                  <CardDescription>Date of your most recent workout</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {workoutHistory?.stats?.lastWorkoutDate ? (
+                    <>
+                      <div className="text-xl font-bold">{getFormattedDate(workoutHistory.stats.lastWorkoutDate)}</div>
+                      <div className="text-sm text-muted-foreground">Keep the momentum going!</div>
+                    </>
+                  ) : (
+                    <div className="text-muted-foreground">No workout recorded yet.</div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Exercise Breakdown</CardTitle>
+                  <CardDescription>Distribution of exercises by category</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {Object.entries(exercisesByCategory).length === 0 ? (
+                    <div className="text-muted-foreground">No exercises added yet.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {Object.entries(exercisesByCategory).map(([category, exercises]) => (
+                        <div key={category} className="flex items-center justify-between">
+                          <div className="font-medium">{category}</div>
+                          <div className="text-sm text-muted-foreground">{exercises.length} exercises</div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </CardContent>
-                <CardFooter className="border-t">
-                  <div className="w-full">
-                    <div className="mb-2 flex items-center justify-between">
-                      <h3 className="text-sm font-medium">Add Exercise</h3>
-                      <Button variant="ghost" size="sm">
-                        <List className="mr-2 h-3 w-3" />
-                        View All
-                      </Button>
-                    </div>
-                    <ScrollArea className="h-24">
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-                        {workoutHistory.exercises.map((exercise) => (
+              </Card>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Add Workout Dialog */}
+        <Dialog open={isAddWorkoutOpen} onOpenChange={setIsAddWorkoutOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add New Workout</DialogTitle>
+              <DialogDescription>Create a new workout for your calendar</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="workout-name">Workout Name</Label>
+                <Input
+                  id="workout-name"
+                  placeholder="e.g., Upper Body Strength"
+                  value={newWorkout.name}
+                  onChange={(e) => setNewWorkout({ ...newWorkout, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="workout-date">Date</Label>
+                <Input
+                  id="workout-date"
+                  type="date"
+                  value={newWorkout.date}
+                  onChange={(e) => setNewWorkout({ ...newWorkout, date: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="workout-notes">Notes (Optional)</Label>
+                <Textarea
+                  id="workout-notes"
+                  placeholder="Any notes about this workout..."
+                  value={newWorkout.notes || ""}
+                  onChange={(e) => setNewWorkout({ ...newWorkout, notes: e.target.value })}
+                />
+              </div>
+
+              {/* Add recurring options to the workout form */}
+              <div className="flex items-center justify-between">
+                <Label htmlFor="isRecurring">Recurring Workout</Label>
+                <Switch
+                  id="isRecurring"
+                  checked={newWorkout.isRecurring}
+                  onCheckedChange={(checked) =>
+                    setNewWorkout({
+                      ...newWorkout,
+                      isRecurring: checked,
+                      recurringType: checked ? "weekly" : "none",
+                    })
+                  }
+                />
+              </div>
+
+              {newWorkout.isRecurring && (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="recurringType">Recurrence Pattern</Label>
+                    <Select
+                      value={newWorkout.recurringType}
+                      onValueChange={(value) =>
+                        setNewWorkout({
+                          ...newWorkout,
+                          recurringType: value as "daily" | "weekly" | "custom" | "none",
+                        })
+                      }
+                    >
+                      <SelectTrigger id="recurringType">
+                        <SelectValue placeholder="Select recurrence pattern" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily">Daily</SelectItem>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="custom">Custom</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {newWorkout.recurringType === "weekly" && (
+                    <div className="grid gap-2">
+                      <Label>Days of Week</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day, index) => (
                           <Button
-                            key={exercise.id}
-                            variant="outline"
-                            className="justify-start"
-                            onClick={() => addSet(exercise.id)}
-                            disabled={selectedWorkout.completed}
+                            key={day}
+                            type="button"
+                            variant={newWorkout.recurringDays?.includes(index) ? "default" : "outline"}
+                            className="h-10 w-10 p-0"
+                            onClick={() => {
+                              const days = newWorkout.recurringDays || []
+                              setNewWorkout({
+                                ...newWorkout,
+                                recurringDays: days.includes(index)
+                                  ? days.filter((d) => d !== index)
+                                  : [...days, index],
+                              })
+                            }}
                           >
-                            <Plus className="mr-2 h-3 w-3" />
-                            {exercise.name}
+                            {day.charAt(0)}
                           </Button>
                         ))}
                       </div>
-                    </ScrollArea>
-                  </div>
-                </CardFooter>
-              </Card>
-            )}
-          </div>
-        </div>
-      )}
-
-      {activeView === "history" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Workout History</CardTitle>
-            <CardDescription>View your past workouts and progress</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {workoutHistory.workouts.length === 0 ? (
-              <div className="flex h-40 flex-col items-center justify-center rounded-md border border-dashed p-6 text-center">
-                <Dumbbell className="mb-2 h-10 w-10 text-muted-foreground" />
-                <p className="text-muted-foreground">No workout history yet</p>
-                <p className="text-sm text-muted-foreground">Start tracking your workouts to build your history</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {[...workoutHistory.workouts]
-                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                  .map((workout) => (
-                    <div key={workout.id} className="rounded-md border">
-                      <div className="flex items-center justify-between border-b p-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{workout.name}</span>
-                            {workout.completed && (
-                              <Badge variant="outline" className="bg-green-500 text-white">
-                                Completed
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="text-sm text-muted-foreground">{getFormattedDate(workout.date)}</div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedWorkout(workout)
-                              setSelectedDate(workout.date)
-                              setActiveView("calendar")
-                            }}
-                          >
-                            View
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => deleteWorkout(workout.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="p-3">
-                        <div className="mb-2 grid grid-cols-3 gap-2 text-center">
-                          <div className="rounded-md bg-muted p-2">
-                            <div className="text-sm text-muted-foreground">Sets</div>
-                            <div className="font-medium">{workout.sets.length}</div>
-                          </div>
-                          <div className="rounded-md bg-muted p-2">
-                            <div className="text-sm text-muted-foreground">Exercises</div>
-                            <div className="font-medium">{new Set(workout.sets.map((set) => set.exerciseId)).size}</div>
-                          </div>
-                          <div className="rounded-md bg-muted p-2">
-                            <div className="text-sm text-muted-foreground">Duration</div>
-                            <div className="font-medium">{workout.duration ? formatTime(workout.duration) : "N/A"}</div>
-                          </div>
-                        </div>
-
-                        <div className="text-sm">
-                          {workout.notes && (
-                            <div className="mt-2 rounded-md bg-muted p-2">
-                              <div className="font-medium">Notes:</div>
-                              <div className="text-muted-foreground">{workout.notes}</div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
                     </div>
-                  ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+                  )}
 
-      {activeView === "stats" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Statistics</CardTitle>
-            <CardDescription>Track your overall progress and achievements</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Total Workouts</CardTitle>
-                  <CardDescription>Number of workouts completed</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{workoutHistory.stats.totalWorkouts}</div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Total Sets</CardTitle>
-                  <CardDescription>Number of sets performed</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{workoutHistory.stats.totalSets}</div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Completed Workouts</CardTitle>
-                  <CardDescription>Workouts marked as complete</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{workoutHistory.stats.totalCompletedWorkouts}</div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Workout Streak</CardTitle>
-                <CardDescription>Your current workout streak</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-4">
-                  <Trophy className="h-8 w-8 text-yellow-500" />
-                  <div>
-                    <div className="text-3xl font-bold">{workoutHistory.stats.streak} days</div>
-                    <div className="text-sm text-muted-foreground">Keep up the good work!</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Last Workout</CardTitle>
-                <CardDescription>Date of your most recent workout</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {workoutHistory.stats.lastWorkoutDate ? (
-                  <>
-                    <div className="text-xl font-bold">{getFormattedDate(workoutHistory.stats.lastWorkoutDate)}</div>
-                    <div className="text-sm text-muted-foreground">Keep the momentum going!</div>
-                  </>
-                ) : (
-                  <div className="text-muted-foreground">No workout recorded yet.</div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Exercise Breakdown</CardTitle>
-                <CardDescription>Distribution of exercises by category</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {Object.entries(exercisesByCategory).length === 0 ? (
-                  <div className="text-muted-foreground">No exercises added yet.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {Object.entries(exercisesByCategory).map(([category, exercises]) => (
-                      <div key={category} className="flex items-center justify-between">
-                        <div className="font-medium">{category}</div>
-                        <div className="text-sm text-muted-foreground">{exercises.length} exercises</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Add Workout Dialog */}
-      <Dialog open={isAddWorkoutOpen} onOpenChange={setIsAddWorkoutOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add New Workout</DialogTitle>
-            <DialogDescription>Create a new workout for your calendar</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="workout-name">Workout Name</Label>
-              <Input
-                id="workout-name"
-                placeholder="e.g., Upper Body Strength"
-                value={newWorkout.name}
-                onChange={(e) => setNewWorkout({ ...newWorkout, name: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="workout-date">Date</Label>
-              <Input
-                id="workout-date"
-                type="date"
-                value={newWorkout.date}
-                onChange={(e) => setNewWorkout({ ...newWorkout, date: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="workout-notes">Notes (Optional)</Label>
-              <Textarea
-                id="workout-notes"
-                placeholder="Any notes about this workout..."
-                value={newWorkout.notes || ""}
-                onChange={(e) => setNewWorkout({ ...newWorkout, notes: e.target.value })}
-              />
-            </div>
-
-            {/* Add recurring options to the workout form */}
-            <div className="flex items-center justify-between">
-              <Label htmlFor="isRecurring">Recurring Workout</Label>
-              <Switch
-                id="isRecurring"
-                checked={newWorkout.isRecurring}
-                onCheckedChange={(checked) =>
-                  setNewWorkout({
-                    ...newWorkout,
-                    isRecurring: checked,
-                    recurringType: checked ? "weekly" : "none",
-                  })
-                }
-              />
-            </div>
-
-            {newWorkout.isRecurring && (
-              <>
-                <div className="grid gap-2">
-                  <Label htmlFor="recurringType">Recurrence Pattern</Label>
-                  <Select
-                    value={newWorkout.recurringType}
-                    onValueChange={(value) =>
-                      setNewWorkout({
-                        ...newWorkout,
-                        recurringType: value as "daily" | "weekly" | "custom" | "none",
-                      })
-                    }
-                  >
-                    <SelectTrigger id="recurringType">
-                      <SelectValue placeholder="Select recurrence pattern" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="daily">Daily</SelectItem>
-                      <SelectItem value="weekly">Weekly</SelectItem>
-                      <SelectItem value="custom">Custom</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {newWorkout.recurringType === "weekly" && (
-                  <div className="grid gap-2">
-                    <Label>Days of Week</Label>
-                    <div className="flex flex-wrap gap-2">
-                      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day, index) => (
-                        <Button
-                          key={day}
-                          type="button"
-                          variant={newWorkout.recurringDays?.includes(index) ? "default" : "outline"}
-                          className="h-10 w-10 p-0"
-                          onClick={() => {
-                            const days = newWorkout.recurringDays || []
+                  {newWorkout.recurringType === "custom" && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="recurringInterval">Repeat every</Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id="recurringInterval"
+                          type="number"
+                          min="1"
+                          value={newWorkout.recurringInterval}
+                          onChange={(e) =>
                             setNewWorkout({
                               ...newWorkout,
-                              recurringDays: days.includes(index) ? days.filter((d) => d !== index) : [...days, index],
+                              recurringInterval: Number.parseInt(e.target.value) || 1,
                             })
-                          }}
-                        >
-                          {day.charAt(0)}
-                        </Button>
-                      ))}
+                          }
+                          className="w-20"
+                        />
+                        <span>days</span>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddWorkoutOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={addWorkout}>Add Workout</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-                {newWorkout.recurringType === "custom" && (
-                  <div className="grid gap-2">
-                    <Label htmlFor="recurringInterval">Repeat every</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id="recurringInterval"
-                        type="number"
-                        min="1"
-                        value={newWorkout.recurringInterval}
-                        onChange={(e) =>
-                          setNewWorkout({
-                            ...newWorkout,
-                            recurringInterval: Number.parseInt(e.target.value) || 1,
-                          })
-                        }
-                        className="w-20"
-                      />
-                      <span>days</span>
-                    </div>
-                  </div>
-                )}
-              </>
+        {/* Edit Workout Dialog */}
+        <Dialog open={!!editingWorkout} onOpenChange={(open) => !open && setEditingWorkout(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Edit Workout</DialogTitle>
+              <DialogDescription>Update your workout details</DialogDescription>
+            </DialogHeader>
+            {editingWorkout && (
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-workout-name">Workout Name</Label>
+                  <Input
+                    id="edit-workout-name"
+                    value={editingWorkout.name}
+                    onChange={(e) => setEditingWorkout({ ...editingWorkout, name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-workout-date">Date</Label>
+                  <Input
+                    id="edit-workout-date"
+                    type="date"
+                    value={editingWorkout.date}
+                    onChange={(e) => setEditingWorkout({ ...editingWorkout, date: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-workout-notes">Notes (Optional)</Label>
+                  <Textarea
+                    id="edit-workout-notes"
+                    placeholder="Any notes about this workout..."
+                    value={editingWorkout.notes || ""}
+                    onChange={(e) => setEditingWorkout({ ...editingWorkout, notes: e.target.value })}
+                  />
+                </div>
+              </div>
             )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddWorkoutOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={addWorkout}>Add Workout</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditingWorkout(null)}>
+                Cancel
+              </Button>
+              <Button onClick={updateWorkout}>Update Workout</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-      {/* Edit Workout Dialog */}
-      <Dialog open={!!editingWorkout} onOpenChange={(open) => !open && setEditingWorkout(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Edit Workout</DialogTitle>
-            <DialogDescription>Update your workout details</DialogDescription>
-          </DialogHeader>
-          {editingWorkout && (
+        {/* Add Exercise Dialog */}
+        <Dialog open={isAddExerciseOpen} onOpenChange={setIsAddExerciseOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add New Exercise</DialogTitle>
+              <DialogDescription>Add a new exercise to your library</DialogDescription>
+            </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-workout-name">Workout Name</Label>
+                <Label htmlFor="exercise-name">Exercise Name</Label>
                 <Input
-                  id="edit-workout-name"
-                  value={editingWorkout.name}
-                  onChange={(e) => setEditingWorkout({ ...editingWorkout, name: e.target.value })}
+                  id="exercise-name"
+                  placeholder="e.g., Dumbbell Curl"
+                  value={newExercise.name}
+                  onChange={(e) => setNewExercise({ ...newExercise, name: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-workout-date">Date</Label>
-                <Input
-                  id="edit-workout-date"
-                  type="date"
-                  value={editingWorkout.date}
-                  onChange={(e) => setEditingWorkout({ ...editingWorkout, date: e.target.value })}
-                />
+                <Label htmlFor="exercise-category">Category</Label>
+                <Select
+                  value={newExercise.category}
+                  onValueChange={(value) => setNewExercise({ ...newExercise, category: value })}
+                >
+                  <SelectTrigger id="exercise-category">
+                    <SelectValue placeholder="Select a category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {exerciseCategories.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        {category}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-workout-notes">Notes (Optional)</Label>
+                <Label htmlFor="exercise-instructions">Instructions (Optional)</Label>
                 <Textarea
-                  id="edit-workout-notes"
-                  placeholder="Any notes about this workout..."
-                  value={editingWorkout.notes || ""}
-                  onChange={(e) => setEditingWorkout({ ...editingWorkout, notes: e.target.value })}
+                  id="exercise-instructions"
+                  placeholder="How to perform this exercise..."
+                  value={newExercise.instructions}
+                  onChange={(e) => setNewExercise({ ...newExercise, instructions: e.target.value })}
                 />
               </div>
             </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingWorkout(null)}>
-              Cancel
-            </Button>
-            <Button onClick={updateWorkout}>Update Workout</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Exercise Dialog */}
-      <Dialog open={isAddExerciseOpen} onOpenChange={setIsAddExerciseOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add New Exercise</DialogTitle>
-            <DialogDescription>Add a new exercise to your library</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="exercise-name">Exercise Name</Label>
-              <Input
-                id="exercise-name"
-                placeholder="e.g., Dumbbell Curl"
-                value={newExercise.name}
-                onChange={(e) => setNewExercise({ ...newExercise, name: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="exercise-category">Category</Label>
-              <Select
-                value={newExercise.category}
-                onValueChange={(value) => setNewExercise({ ...newExercise, category: value })}
-              >
-                <SelectTrigger id="exercise-category">
-                  <SelectValue placeholder="Select a category" />
-                </SelectTrigger>
-                <SelectContent>
-                  {exerciseCategories.map((category) => (
-                    <SelectItem key={category} value={category}>
-                      {category}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="exercise-instructions">Instructions (Optional)</Label>
-              <Textarea
-                id="exercise-instructions"
-                placeholder="How to perform this exercise..."
-                value={newExercise.instructions}
-                onChange={(e) => setNewExercise({ ...newExercise, instructions: e.target.value })}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddExerciseOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={addExercise}>Add Exercise</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddExerciseOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={addExercise}>Add Exercise</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </ErrorBoundary>
   )
 }

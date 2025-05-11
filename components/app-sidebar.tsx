@@ -42,11 +42,14 @@ import { ModeToggle } from "@/components/mode-toggle"
 import { Badge } from "@/components/ui/badge"
 import { useUserPreferences } from "@/contexts/user-preferences-context"
 import React from "react"
+import { useWindowSize } from "@/hooks/use-window-size"
 
 // Memoize the component to prevent unnecessary re-renders
 export const AppSidebar = React.memo(function AppSidebar() {
   const pathname = usePathname()
   const { isStudent, isProfessional, isLoading, preferences } = useUserPreferences()
+  const { width } = useWindowSize()
+  const isMobile = width ? width < 768 : false
 
   // Common menu items for both roles - memoized to prevent recreating on each render
   const commonMenuItems = useMemo(
@@ -274,6 +277,11 @@ export const AppSidebar = React.memo(function AppSidebar() {
       return "Loading..."
     }
   }, [isLoading, isStudent, preferences])
+
+  // Hide sidebar completely on mobile as we're using bottom navigation
+  if (isMobile) {
+    return null
+  }
 
   return (
     <Sidebar className="border-r z-50">

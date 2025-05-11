@@ -53,6 +53,9 @@ export async function PUT(request: Request) {
     if (updateData.avatarUrl !== undefined) profileData.avatar_url = updateData.avatarUrl
     if (updateData.bio) profileData.bio = updateData.bio
 
+    // Add updated_at timestamp
+    profileData.updated_at = new Date().toISOString()
+
     // Update profile
     const { error: updateError } = await supabase.from("profiles").update(profileData).eq("id", userId)
 

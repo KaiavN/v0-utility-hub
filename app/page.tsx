@@ -10,11 +10,15 @@ import { Button } from "@/components/ui/button"
 import { GraduationCap, Briefcase } from "lucide-react"
 import { GitHubLoginButton } from "@/components/auth/github-login-button"
 import { useAuth } from "@/contexts/auth-context"
+import { MobileDashboard } from "@/components/mobile-dashboard"
+import { useWindowSize } from "@/hooks/use-window-size"
 
 export default function HomePage() {
   const { preferences, setRole, isStudent, isProfessional } = useUserPreferences()
   const { user, isAuthenticated } = useAuth()
   const [mounted, setMounted] = useState(false)
+  const { width } = useWindowSize()
+  const isMobile = width ? width < 768 : false
 
   useEffect(() => {
     setMounted(true)
@@ -26,12 +30,13 @@ export default function HomePage() {
       {
         title: "Daily Planner",
         description: "Plan your day with time blocks and tasks.",
-        href: "/tasks",
+        href: "/calendar",
       },
       {
-        title: "Notes",
-        description: "Create and organize your notes and thoughts.",
-        href: "/notes",
+        title: "Spotify Music",
+        description: "Stream your favorite music.",
+        href: "/spotify",
+        isNew: true,
       },
       {
         title: "Recipe Manager",
@@ -54,11 +59,13 @@ export default function HomePage() {
         title: "Assignment Tracker",
         description: "Never miss a deadline with assignment tracking.",
         href: "/assignments",
+        isNew: true,
       },
       {
         title: "Citation Generator",
         description: "Generate citations in APA, MLA, Chicago, and Harvard formats.",
         href: "/citations",
+        isNew: true,
       },
     ],
     [],
@@ -76,6 +83,7 @@ export default function HomePage() {
         title: "Project Tracker",
         description: "Manage professional projects and deadlines.",
         href: "/projects",
+        isNew: true,
       },
     ],
     [],
@@ -103,6 +111,12 @@ export default function HomePage() {
     )
   }
 
+  // Show mobile dashboard on mobile devices
+  if (isMobile) {
+    return <MobileDashboard />
+  }
+
+  // Desktop view
   return (
     <div className="container mx-auto p-6">
       <div className="mb-8">
@@ -176,11 +190,17 @@ export default function HomePage() {
             className="group cursor-pointer rounded-xl border bg-card p-6 shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
             prefetch={false}
           >
-            <h3 className="mb-2 text-lg font-medium">
-              {feature.title}{" "}
-              <ArrowRight className="ml-1 inline-block h-4 w-4 transition-transform group-hover:translate-x-1" />
-            </h3>
-            <p className="text-muted-foreground">{feature.description}</p>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-medium">{feature.title}</h3>
+              {feature.isNew && (
+                <span className="text-xs bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full">New</span>
+              )}
+            </div>
+            <p className="text-muted-foreground mb-2">{feature.description}</p>
+            <div className="flex items-center text-sm text-primary mt-2">
+              <span>Get started</span>
+              <ArrowRight className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-1" />
+            </div>
           </Link>
         ))}
 
@@ -191,11 +211,17 @@ export default function HomePage() {
             className="group cursor-pointer rounded-xl border bg-card p-6 shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
             prefetch={false}
           >
-            <h3 className="mb-2 text-lg font-medium">
-              {feature.title}{" "}
-              <ArrowRight className="ml-1 inline-block h-4 w-4 transition-transform group-hover:translate-x-1" />
-            </h3>
-            <p className="text-muted-foreground">{feature.description}</p>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-medium">{feature.title}</h3>
+              {feature.isNew && (
+                <span className="text-xs bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full">New</span>
+              )}
+            </div>
+            <p className="text-muted-foreground mb-2">{feature.description}</p>
+            <div className="flex items-center text-sm text-primary mt-2">
+              <span>Get started</span>
+              <ArrowRight className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-1" />
+            </div>
           </Link>
         ))}
       </div>

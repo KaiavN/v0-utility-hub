@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { useState, useEffect, Suspense, lazy } from "react"
 import { Inter } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
@@ -13,7 +14,6 @@ import { SiteHeader } from "@/components/site-header"
 import { SpotifyProvider } from "@/contexts/spotify-context"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { SearchParamsWrapper } from "@/components/search-params-wrapper"
-import { useState, useEffect, Suspense } from "react"
 import { getLocalStorage, setLocalStorage } from "@/lib/local-storage"
 import dynamic from "next/dynamic"
 import { validateDataIntegrity, repairCorruptedData, migrateDataIfNeeded } from "@/lib/data-manager"
@@ -23,6 +23,22 @@ import { StorageMonitor } from "@/components/storage-monitor"
 
 // Add the AIAssistant import at the top of the file
 import { AIAssistant } from "@/components/ai/ai-assistant"
+
+// Import the data-persistence-monitor:
+import { initPersistenceMonitor } from "@/lib/data-persistence-monitor"
+
+// Import mobile navigation
+import { MobileNavigation } from "@/components/mobile-navigation"
+import { useWindowSize } from "@/hooks/use-window-size"
+import { cn } from "@/lib/utils"
+
+// Import TutorialManager for first-time users
+const TutorialManager = lazy(() =>
+  import("@/components/tutorials/tutorial-manager").then((mod) => ({ default: mod.TutorialManager })),
+)
+
+// Loading fallback component
+const LoadingFallback = () => <div className="min-h-[40px]"></div>
 
 // Dynamically import non-critical components with aggressive chunking
 const DataManager = dynamic(() => import("@/components/data-manager").then((mod) => ({ default: mod.DataManager })), {
@@ -46,14 +62,11 @@ const inter = Inter({
   fallback: ["system-ui", "sans-serif"], // Add fallback fonts
 })
 
-// Loading fallback component
-const LoadingFallback = () => <div className="min-h-[40px]"></div>
-
-interface Props {
+interface ClientLayoutProps {
   children: React.ReactNode
 }
 
-export default function ClientLayout({ children }: Props) {
+export default function ClientLayout({ children }: ClientLayoutProps) {
   // Apply initial theme color immediately to avoid flicker
   useEffect(() => {
     // Apply default theme color to avoid flicker
@@ -66,6 +79,9 @@ export default function ClientLayout({ children }: Props) {
     fontSize: 100,
   })
   const [isLoaded, setIsLoaded] = useState(false)
+  const { width } = useWindowSize() || { width: undefined }
+  const isMobile = width ? width < 768 : false
+  const [showTutorial, setShowTutorial] = useState(false)
 
   // Load settings safely after component mounts
   useEffect(() => {
@@ -82,6 +98,14 @@ export default function ClientLayout({ children }: Props) {
       // Load settings with validation
       const savedThemeColor = getLocalStorage("global-theme-color", "blue")
       const savedFontSize = getLocalStorage("global-font-size", 100)
+
+      // Check if this is the first time the user visits the site
+      const hasSeenTutorial = getLocalStorage("has-seen-tutorial", false)
+      setShowTutorial(!hasSeenTutorial)
+
+      if (!hasSeenTutorial) {
+        setLocalStorage("has-seen-tutorial", true)
+      }
 
       setUserSettings({
         themeColor: savedThemeColor || "blue", // Ensure fallback to blue
@@ -118,6 +142,17 @@ export default function ClientLayout({ children }: Props) {
     }
   }, [userSettings, isLoaded])
 
+  // Initialize data persistence monitor
+  useEffect(() => {
+    try {
+      // Initialize the persistence monitor
+      initPersistenceMonitor()
+      console.log("Data persistence monitor initialized in client layout")
+    } catch (error) {
+      console.error("Error initializing data persistence monitor:", error)
+    }
+  }, [])
+
   const handleSettingsUpdate = (settings: any) => {
     try {
       if (!settings) return
@@ -148,6 +183,7 @@ export default function ClientLayout({ children }: Props) {
         {/* Add meta for better mobile experience */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
       </head>
       <body className={inter.className}>
         <ErrorBoundary>
@@ -161,8 +197,13 @@ export default function ClientLayout({ children }: Props) {
                         <SiteHeader onSettingsUpdate={handleSettingsUpdate} />
                         <div className="flex flex-1 overflow-hidden">
                           <AppSidebar />
-                          <main className="flex-1 overflow-auto bg-background">{children}</main>
+                          <main
+                            className={cn("flex-1 overflow-auto bg-background", isMobile ? "pt-12 pb-16" : "pt-24")}
+                          >
+                            {children}
+                          </main>
                         </div>
+                        <MobileNavigation />
                       </div>
                       <Toaster />
                       <Suspense fallback={<LoadingFallback />}>
@@ -171,8 +212,18 @@ export default function ClientLayout({ children }: Props) {
                       <Suspense fallback={<LoadingFallback />}>
                         <SpotifyConnectionManager />
                       </Suspense>
+
+                      {/* Interactive tutorial system */}
+                      {showTutorial && (
+                        <Suspense fallback={<LoadingFallback />}>
+                          <TutorialManager />
+                        </Suspense>
+                      )}
                     </SidebarProvider>
                   </SpotifyProvider>
+                  <Suspense fallback={<LoadingFallback />}>
+                    <AIAssistant />
+                  </Suspense>
                 </UserPreferencesProvider>
               </AuthProvider>
             </ThemeProvider>
@@ -181,9 +232,6 @@ export default function ClientLayout({ children }: Props) {
             </Suspense>
             <Suspense fallback={<LoadingFallback />}>
               <StorageMonitor />
-            </Suspense>
-            <Suspense fallback={<LoadingFallback />}>
-              <AIAssistant />
             </Suspense>
           </SearchParamsWrapper>
         </ErrorBoundary>

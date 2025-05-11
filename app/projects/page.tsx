@@ -21,6 +21,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { LinkedItemsList } from "@/components/linked-items/linked-items-list"
+import { LinkItemDialog } from "@/components/linked-items/link-item-dialog"
 
 // Types
 interface Project {
@@ -819,6 +821,31 @@ export default function ProjectsPage() {
                               <div className="p-4 border rounded-md min-h-[200px] whitespace-pre-line">
                                 {activeProject.notes || "No notes added yet."}
                               </div>
+                            )}
+                          </div>
+                          <div className="space-y-4 mt-6">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="text-sm font-medium text-muted-foreground">Linked Items</h3>
+                              {activeProject && (
+                                <LinkItemDialog
+                                  sourceId={activeProject.id}
+                                  sourceType="project"
+                                  onLinkAdded={() => {
+                                    // Force refresh
+                                    const updatedProjects = [...projects]
+                                    setProjects(updatedProjects)
+                                  }}
+                                />
+                              )}
+                            </div>
+                            {activeProject && (
+                              <LinkedItemsList
+                                sourceId={activeProject.id}
+                                sourceType="project"
+                                showEmpty={true}
+                                maxItems={5}
+                                emptyMessage="No items linked to this project yet. Link clients, invoices, meetings, or other related items."
+                              />
                             )}
                           </div>
                         </div>

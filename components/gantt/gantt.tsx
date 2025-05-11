@@ -1,7 +1,18 @@
 "use client"
 
 import { useReducer, useState, useEffect, useCallback, useRef } from "react"
-import { List, BarChart2, KanbanSquare, Calendar, Plus, Filter, Search, SlidersHorizontal } from "lucide-react"
+import {
+  List,
+  BarChart2,
+  KanbanSquare,
+  CalendarIcon,
+  Plus,
+  Filter,
+  Search,
+  SlidersHorizontal,
+  Menu,
+  X,
+} from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -26,6 +37,8 @@ import { toast } from "@/hooks/use-toast"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { getLocalStorage, setLocalStorage } from "@/lib/local-storage"
+import { useWindowSize } from "@/hooks/use-window-size"
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 
 interface GanttProps {
   tasks: Task[]
@@ -49,16 +62,8 @@ export function Gantt({
   sections: initialSections,
   onUpdateData,
 }: GanttProps) {
-  // Add debugging to see what data is being passed to child components
-
-  console.log("Gantt component received tasks:", initialTasks.length)
-  console.log("Gantt component received projects:", initialProjects.length)
-
-  // Make sure tasks and projects are being properly passed to child components
-  // Check if there's any filtering happening that might be removing tasks
-
-  // If there's a useEffect or other logic that processes tasks before passing them to children,
-  // add logging there to see what's happening
+  // Get window size for responsive design
+  const { width, isMobile, isTablet } = useWindowSize()
 
   // Force re-render counter
   const [forceUpdate, setForceUpdate] = useState(0)
@@ -76,7 +81,7 @@ export function Gantt({
     selectedSection: null,
     selectedDate: new Date(),
     zoomLevel: 50,
-    currentView: "gantt" as ViewType,
+    currentView: isMobile ? "list" : ("gantt" as ViewType),
   })
 
   // Keep a reference to the latest state for callbacks
@@ -190,9 +195,16 @@ export function Gantt({
   const [taskDetailDialogOpen, setTaskDetailDialogOpen] = useState(false)
   const [targetProjectId, setTargetProjectId] = useState<string | null>(null)
   const [targetSectionId, setTargetSectionId] = useState<string | null>(null)
-  const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [sidebarVisible, setSidebarVisible] = useState(!isMobile)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedUser, setSelectedUser] = useState<string | null>(null)
+  const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+
+  // Update sidebar visibility when screen size changes
+  useEffect(() => {
+    setSidebarVisible(!isMobile)
+  }, [isMobile])
 
   // Update parent component with data changes
   const notifyDataChange = useCallback(() => {
@@ -274,11 +286,17 @@ export function Gantt({
   // Handle project selection
   const handleSelectProject = (projectId: string) => {
     dispatch({ type: "SELECT_PROJECT", payload: projectId })
+    if (isMobile) {
+      setMobileSidebarOpen(false)
+    }
   }
 
   // Handle section selection
   const handleSelectSection = (sectionId: string) => {
     dispatch({ type: "SELECT_SECTION", payload: sectionId })
+    if (isMobile) {
+      setMobileSidebarOpen(false)
+    }
   }
 
   // Handle task update
@@ -323,7 +341,7 @@ export function Gantt({
   }
 
   // Handle adding a new task
-  const handleAddTask = (projectId?: string, sectionId?: string) => {
+  const handleAddTask = (projectId?: string, sectionId?: string, status?: string) => {
     setTargetProjectId(projectId || null)
     setTargetSectionId(sectionId || null)
     setAddTaskDialogOpen(true)
@@ -570,6 +588,7 @@ export function Gantt({
             onSelectTask={handleSelectTask}
             onUpdateTask={handleUpdateTask}
             onUpdateTaskDates={handleUpdateTaskDates}
+            isMobile={isMobile}
           />
         )
       case "board":
@@ -581,6 +600,9 @@ export function Gantt({
             sections={state.sections}
             onSelectTask={handleSelectTask}
             onUpdateTaskStatus={handleUpdateTaskStatus}
+            onAddTask={(status) => handleAddTask(undefined, undefined, status)}
+            users={state.users}
+            isMobile={isMobile}
           />
         )
       case "calendar":
@@ -593,6 +615,11 @@ export function Gantt({
             onSelectTask={handleSelectTask}
             selectedDate={state.selectedDate}
             onSelectDate={handleSelectDate}
+            onAddTask={(date) => {
+              handleSelectDate(date)
+              handleAddTask()
+            }}
+            isMobile={isMobile}
           />
         )
       case "list":
@@ -602,8 +629,11 @@ export function Gantt({
             tasks={filteredTasks}
             projects={state.projects}
             sections={state.sections}
+            users={state.users}
             onSelectTask={handleSelectTask}
             onUpdateTask={handleUpdateTask}
+            onAddTask={() => handleAddTask()}
+            isMobile={isMobile}
           />
         )
       default:
@@ -619,11 +649,146 @@ export function Gantt({
     }
   }, [teamMembersDialogOpen])
 
+  // Render mobile sidebar
+  const renderMobileSidebar = () => {
+    return (
+      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+        <SheetTrigger asChild>
+          <Button variant="outline" size="icon" className="md:hidden">
+            <Menu className="h-4 w-4" />
+          </Button>
+        </SheetTrigger>
+        <SheetContent side="left" className="p-0 w-[85vw] max-w-[300px]">
+          <div className="flex flex-col h-full">
+            <div className="p-4 border-b flex items-center justify-between">
+              <h2 className="font-semibold">Projects</h2>
+              <Button variant="ghost" size="icon" onClick={() => setMobileSidebarOpen(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex-1 overflow-auto">
+              <ProjectSidebar
+                key={`sidebar-mobile-${forceUpdate}`}
+                projects={state.projects}
+                sections={state.sections}
+                tasks={state.tasks}
+                selectedProject={state.selectedProject}
+                selectedSection={state.selectedSection}
+                selectedTask={state.selectedTask}
+                onSelectProject={handleSelectProject}
+                onSelectSection={handleSelectSection}
+                onSelectTask={handleSelectTask}
+                onAddProject={handleAddProject}
+                onAddSection={handleAddSection}
+                onAddTask={handleAddTask}
+                onEditProject={handleEditProject}
+                onEditSection={handleEditSection}
+                onDeleteProject={handleDeleteProject}
+                onDeleteSection={handleDeleteSection}
+                state={state}
+                dispatch={dispatch}
+                onTaskSelect={handleSelectTask}
+                selectedTaskId={state.selectedTask}
+                isMobile={true}
+              />
+            </div>
+            <div className="mt-auto border-t">
+              <TeamMembersList
+                users={state.users}
+                onManageTeam={() => {
+                  setTeamMembersDialogOpen(true)
+                  setMobileSidebarOpen(false)
+                }}
+                onSelectUser={(userId) => {
+                  setSelectedUser(userId)
+                  setMobileSidebarOpen(false)
+                }}
+                selectedUserId={selectedUser}
+                className="border-0 rounded-none"
+              />
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+    )
+  }
+
+  // Render mobile filter panel
+  const renderMobileFilter = () => {
+    return (
+      <Sheet open={mobileFilterOpen} onOpenChange={setMobileFilterOpen}>
+        <SheetTrigger asChild>
+          <Button variant="outline" size="icon" className="md:hidden">
+            <Filter className="h-4 w-4" />
+          </Button>
+        </SheetTrigger>
+        <SheetContent side="right" className="w-[85vw] max-w-[300px]">
+          <div className="flex flex-col h-full">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg">Filters</h2>
+              <Button variant="ghost" size="icon" onClick={() => setMobileFilterOpen(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium mb-2">Search</h3>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search tasks..."
+                    className="pl-8"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {selectedUser && (
+                <div>
+                  <h3 className="text-sm font-medium mb-2">Assigned To</h3>
+                  <Badge variant="secondary" className="gap-1">
+                    {state.users.find((u) => u.id === selectedUser)?.name}
+                    <button className="ml-1 rounded-full hover:bg-muted" onClick={() => setSelectedUser(null)}>
+                      ×
+                    </button>
+                  </Badge>
+                </div>
+              )}
+
+              {state.currentView === "gantt" && (
+                <div>
+                  <h3 className="text-sm font-medium mb-2">Zoom Level</h3>
+                  <Slider value={[state.zoomLevel]} min={10} max={100} step={10} onValueChange={handleZoomChange} />
+                </div>
+              )}
+            </div>
+
+            <div className="mt-auto pt-4 border-t">
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  setSearchQuery("")
+                  setSelectedUser(null)
+                  setMobileFilterOpen(false)
+                }}
+              >
+                Clear Filters
+              </Button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+    )
+  }
+
   return (
-    <div className="flex h-full">
-      {/* Project Sidebar */}
-      {sidebarVisible && (
-        <div className="flex flex-col h-full border-r" style={{ width: "300px" }}>
+    <div className="flex h-full flex-col md:flex-row">
+      {/* Project Sidebar - Desktop */}
+      {sidebarVisible && !isMobile && (
+        <div className="hidden md:flex flex-col h-full border-r" style={{ width: "300px" }}>
           <div className="flex-1 overflow-auto">
             <ProjectSidebar
               key={`sidebar-${forceUpdate}`}
@@ -666,10 +831,18 @@ export function Gantt({
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         <Card className="flex-1 border-0 rounded-none shadow-none">
           <CardContent className="p-0 h-full flex flex-col">
-            <div className="p-4 border-b flex flex-col gap-4">
+            <div className="p-2 md:p-4 border-b flex flex-col gap-2 md:gap-4">
               <div className="flex items-center justify-between">
-                <Tabs defaultValue={state.currentView} onValueChange={(value) => handleViewChange(value as ViewType)}>
-                  <TabsList>
+                {/* Mobile sidebar toggle */}
+                {isMobile && renderMobileSidebar()}
+
+                {/* View tabs */}
+                <Tabs
+                  defaultValue={state.currentView}
+                  onValueChange={(value) => handleViewChange(value as ViewType)}
+                  className="flex-1 flex justify-center md:justify-start"
+                >
+                  <TabsList className="grid grid-cols-4 w-full max-w-[300px]">
                     <TabsTrigger value="gantt" className="flex items-center gap-1.5">
                       <BarChart2 className="h-4 w-4" />
                       <span className="hidden sm:inline">Gantt</span>
@@ -679,7 +852,7 @@ export function Gantt({
                       <span className="hidden sm:inline">Board</span>
                     </TabsTrigger>
                     <TabsTrigger value="calendar" className="flex items-center gap-1.5">
-                      <Calendar className="h-4 w-4" />
+                      <CalendarIcon className="h-4 w-4" />
                       <span className="hidden sm:inline">Calendar</span>
                     </TabsTrigger>
                     <TabsTrigger value="list" className="flex items-center gap-1.5">
@@ -690,56 +863,65 @@ export function Gantt({
                 </Tabs>
 
                 <div className="flex items-center gap-2">
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => setSidebarVisible(!sidebarVisible)}
-                          className="h-8 w-8"
-                        >
-                          <List className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{sidebarVisible ? "Hide Sidebar" : "Show Sidebar"}</TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  {/* Desktop sidebar toggle */}
+                  {!isMobile && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setSidebarVisible(!sidebarVisible)}
+                            className="h-8 w-8 hidden md:flex"
+                          >
+                            <List className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{sidebarVisible ? "Hide Sidebar" : "Show Sidebar"}</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
 
+                  {/* Add task button */}
                   <Button onClick={() => handleAddTask()} size="sm" className="h-8">
                     <Plus className="h-4 w-4 mr-1" />
                     <span className="hidden sm:inline">Add Task</span>
                   </Button>
 
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="icon" className="h-8 w-8">
-                        <SlidersHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      <div className="p-2">
-                        <p className="text-sm font-medium mb-2">View Options</p>
-                        {state.currentView === "gantt" && (
-                          <div className="space-y-2">
-                            <p className="text-xs text-muted-foreground">Zoom Level</p>
-                            <Slider
-                              value={[state.zoomLevel]}
-                              min={10}
-                              max={100}
-                              step={10}
-                              onValueChange={handleZoomChange}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  {/* Desktop settings button */}
+                  {!isMobile && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="h-8 w-8">
+                          <SlidersHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-56">
+                        <div className="p-2">
+                          <p className="text-sm font-medium mb-2">View Options</p>
+                          {state.currentView === "gantt" && (
+                            <div className="space-y-2">
+                              <p className="text-xs text-muted-foreground">Zoom Level</p>
+                              <Slider
+                                value={[state.zoomLevel]}
+                                min={10}
+                                max={100}
+                                step={10}
+                                onValueChange={handleZoomChange}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               </div>
 
+              {/* Search and filter bar */}
               <div className="flex items-center gap-2">
-                <div className="relative flex-1 max-w-md">
+                {/* Search input - desktop */}
+                <div className="relative flex-1 max-w-md hidden md:block">
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder="Search tasks..."
@@ -749,8 +931,19 @@ export function Gantt({
                   />
                 </div>
 
+                {/* Mobile search input - simplified */}
+                <div className="flex-1 md:hidden">
+                  <Input
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Selected user badge */}
                 {selectedUser && (
-                  <Badge variant="secondary" className="gap-1">
+                  <Badge variant="secondary" className="gap-1 hidden md:flex">
                     {state.users.find((u) => u.id === selectedUser)?.name}
                     <button className="ml-1 rounded-full hover:bg-muted" onClick={() => setSelectedUser(null)}>
                       ×
@@ -758,13 +951,20 @@ export function Gantt({
                   </Badge>
                 )}
 
-                <Button variant="outline" size="icon" className="h-9 w-9">
-                  <Filter className="h-4 w-4" />
-                </Button>
+                {/* Mobile filter button */}
+                {isMobile && renderMobileFilter()}
+
+                {/* Desktop filter button */}
+                {!isMobile && (
+                  <Button variant="outline" size="icon" className="h-9 w-9">
+                    <Filter className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-4">{renderCurrentView()}</div>
+            {/* Main view content */}
+            <div className="flex-1 overflow-auto p-2 md:p-4">{renderCurrentView()}</div>
           </CardContent>
         </Card>
       </div>
@@ -789,6 +989,7 @@ export function Gantt({
             handleDeleteTask(taskId)
             setTaskDetailDialogOpen(false) // Close dialog after deletion
           }}
+          isMobile={isMobile}
         />
       )}
 
@@ -801,12 +1002,14 @@ export function Gantt({
         sections={state.sections}
         defaultProjectId={targetProjectId || undefined}
         defaultSectionId={targetSectionId || undefined}
+        isMobile={isMobile}
       />
 
       <AddProjectDialog
         open={addProjectDialogOpen}
         onOpenChange={setAddProjectDialogOpen}
         onAddProject={handleCreateProject}
+        isMobile={isMobile}
       />
 
       <AddSectionDialog
@@ -815,6 +1018,7 @@ export function Gantt({
         onAddSection={handleCreateSection}
         projects={state.projects}
         defaultProjectId={targetProjectId || undefined}
+        isMobile={isMobile}
       />
 
       <TeamMembersDialog
@@ -832,6 +1036,7 @@ export function Gantt({
         onSave={handleUpdateTeamMembers}
         tasks={state.tasks}
         projects={state.projects}
+        isMobile={isMobile}
       />
     </div>
   )
