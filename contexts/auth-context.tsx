@@ -71,6 +71,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Create a fresh client for each render
   const supabase = createDirectSupabaseClient()
 
+  // Helper function to ensure user profile exists
+  const ensureUserProfile = async (userData: User) => {
+    try {
+      // Check if profile exists
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userData.id)
+        .single()
+
+      if (profileError && profileError.code !== "PGRST116") {
+        console.error("Error fetching profile:", profileError)
+      }
+
+      if (profileData) {
+        setProfile(profileData)
+        return profileData
+      } else {
+        // If profile doesn't exist, create one
+        const { error: insertError } = await supabase.from("profiles").insert([
+          {
+            id: userData.id,
+            email: userData.email,
+            display_name: userData.name || userData.email?.split("@")[0] || "User",
+            avatar_url: userData.avatarUrl || null,
+            updated_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            role: "user",
+          },
+        ])
+
+        if (insertError) {
+          console.error("Error creating profile:", insertError)
+          return null
+        }
+
+        // Fetch the newly created profile
+        const { data: newProfile, error: fetchError } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", userData.id)
+          .single()
+
+        if (fetchError) {
+          console.error("Error fetching new profile:", fetchError)
+          return null
+        }
+
+        if (newProfile) {
+          setProfile(newProfile)
+          return newProfile
+        }
+      }
+    } catch (error) {
+      console.error("Error ensuring user profile:", error)
+    }
+    return null
+  }
+
   // Load user data on initial mount
   useEffect(() => {
     const loadUser = async () => {
@@ -100,50 +159,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(userData)
           setIsAuthenticated(true)
 
-          // Fetch user profile
-          const { data: profileData, error: profileError } = await supabase
-            .from("profiles")
-            .select("*")
-            .eq("id", session.user.id)
-            .single()
-
-          // Check if the error is just that the profile doesn't exist
-          if (profileError && profileError.code !== "PGRST116") {
-            console.error("Error fetching profile:", profileError)
-          }
-
-          if (profileData) {
-            setProfile(profileData)
-          } else {
-            // If profile doesn't exist, create one
-            const { error: insertError } = await supabase.from("profiles").insert([
-              {
-                id: session.user.id,
-                email: session.user.email,
-                display_name: userData.name || session.user.email?.split("@")[0] || "User",
-                avatar_url: userData.avatarUrl || null,
-                updated_at: new Date().toISOString(),
-                created_at: new Date().toISOString(),
-                role: "user",
-              },
-            ])
-
-            if (insertError) {
-              console.error("Error creating profile:", insertError)
-              // Continue without throwing - we'll try again on next auth state change
-            } else {
-              // Fetch the newly created profile
-              const { data: newProfile } = await supabase
-                .from("profiles")
-                .select("*")
-                .eq("id", session.user.id)
-                .single()
-
-              if (newProfile) {
-                setProfile(newProfile)
-              }
-            }
-          }
+          // Ensure profile exists
+          await ensureUserProfile(userData)
         } else {
           // No active session
           setUser(null)
@@ -180,46 +197,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(userData)
         setIsAuthenticated(true)
 
-        // Fetch user profile
-        const { data: profileData, error: profileError } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", session.user.id)
-          .single()
-
-        // Check if the error is just that the profile doesn't exist
-        if (profileError && profileError.code !== "PGRST116") {
-          console.error("Error fetching profile after sign in:", profileError)
-        }
-
-        if (profileData) {
-          setProfile(profileData)
-        } else {
-          // If profile doesn't exist, create one
-          const { error: insertError } = await supabase.from("profiles").insert([
-            {
-              id: session.user.id,
-              email: session.user.email,
-              display_name: userData.name || session.user.email?.split("@")[0] || "User",
-              avatar_url: userData.avatarUrl || null,
-              updated_at: new Date().toISOString(),
-              created_at: new Date().toISOString(),
-              role: "user",
-            },
-          ])
-
-          if (insertError) {
-            console.error("Error creating profile after sign in:", insertError)
-            // Continue without throwing - we'll try again on next login
-          } else {
-            // Fetch the newly created profile
-            const { data: newProfile } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
-
-            if (newProfile) {
-              setProfile(newProfile)
-            }
-          }
-        }
+        // Ensure profile exists
+        await ensureUserProfile(userData)
 
         // Redirect to the stored path or home
         const redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
@@ -267,10 +246,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const siteUrl = getSiteUrl()
       console.log("Logging in with GitHub, redirect URL:", `${siteUrl}/auth/callback`)
 
-      const { error, data } = await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
           redirectTo: `${siteUrl}/auth/callback`,
+          // Explicitly request the scopes we need
+          scopes: "read:user user:email",
         },
       })
 
@@ -281,8 +262,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           description: error.message || "Failed to login with GitHub",
           variant: "destructive",
         })
-      } else {
-        console.log("GitHub login initiated:", data)
       }
     } catch (error) {
       console.error("GitHub login unexpected error:", error)
@@ -309,10 +288,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const siteUrl = getSiteUrl()
       console.log("Logging in with Google, redirect URL:", `${siteUrl}/auth/callback`)
 
-      const { error, data } = await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: `${siteUrl}/auth/callback`,
+          // Explicitly request the scopes we need
+          scopes: "email profile",
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+          },
         },
       })
 
@@ -323,8 +308,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           description: error.message || "Failed to login with Google",
           variant: "destructive",
         })
-      } else {
-        console.log("Google login initiated:", data)
       }
     } catch (error) {
       console.error("Google login unexpected error:", error)
