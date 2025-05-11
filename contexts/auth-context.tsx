@@ -2,9 +2,8 @@
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { toast } from "@/components/ui/use-toast"
-import { createClient } from "@supabase/supabase-js"
 import { useRouter } from "next/navigation"
-import { clientConfig } from "@/lib/client-config"
+import { getSupabaseClient } from "@/lib/supabase-client"
 
 // Simplified User type
 type User = {
@@ -27,40 +26,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Create a direct Supabase client
-const createDirectSupabaseClient = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.error("Missing Supabase environment variables")
-    // Return a dummy client that will log errors instead of crashing
-    return {
-      auth: {
-        getSession: () => Promise.resolve({ data: { session: null }, error: null }),
-        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
-        signInWithOAuth: () => {
-          console.error("Cannot sign in: Missing Supabase credentials")
-          return Promise.resolve({ error: new Error("Missing Supabase credentials") })
-        },
-        signOut: () => Promise.resolve({ error: null }),
-      },
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            single: () => Promise.resolve({ data: null, error: null }),
-          }),
-        }),
-        update: () => ({
-          eq: () => Promise.resolve({ error: null }),
-        }),
-      }),
-    } as any
-  }
-
-  return createClient(supabaseUrl, supabaseAnonKey)
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<any | null>(null)
@@ -68,12 +33,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
 
-  // Create a fresh client for each render
-  const supabase = createDirectSupabaseClient()
+  // Get Supabase client
+  const supabase = getSupabaseClient()
 
   // Helper function to ensure user profile exists
   const ensureUserProfile = async (userData: User) => {
     try {
+      console.log("Ensuring user profile exists for:", userData.id)
+
       // Check if profile exists
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
@@ -180,9 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadUser()
 
     // Set up auth state change listener
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("Auth state changed:", event)
 
       if (event === "SIGNED_IN" && session) {
@@ -213,17 +178,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
 
     return () => {
-      subscription.unsubscribe()
+      if (data && data.subscription) {
+        data.subscription.unsubscribe()
+      }
     }
   }, [router])
 
   // Get the correct site URL
   const getSiteUrl = () => {
-    // Use the APP_URL from environment variables if available
-    if (clientConfig.appUrl) {
-      return clientConfig.appUrl.trim().replace(/\/$/, "") // Remove trailing slash if present
-    }
-
     // Fallback to window.location.origin in the browser
     if (typeof window !== "undefined") {
       return window.location.origin
@@ -367,7 +329,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase
         .from("profiles")
         .update({
-          username: data.username,
           display_name: data.displayName,
           avatar_url: data.avatarUrl,
           updated_at: new Date().toISOString(),

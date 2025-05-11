@@ -1,30 +1,23 @@
-/**
- * Client-side configuration
- * This file contains configuration that is available on the client side
- */
+// This file contains configuration that's embedded at build time
+// and available to the client
 
-export const clientConfig = {
-  // App URL - used for OAuth redirects and other absolute URLs
-  appUrl:
-    process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_VERCEL_URL
-      ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
-      : process.env.SITE_URL || "",
+type ClientConfig = {
+  supabase: {
+    url: string
+    anonKey: string
+  }
+  app: {
+    url: string
+  }
+}
 
-  // Feature flags
-  features: {
-    enableGoogleAuth: true,
-    enableGitHubAuth: true,
-    enableEmailAuth: true,
+// These values are embedded at build time
+export const clientConfig: ClientConfig = {
+  supabase: {
+    url: process.env.STORAGE_NEXT_PUBLIC_SUPABASE_URL || "",
+    anonKey: process.env.STORAGE_NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
   },
-
-  // Default settings
-  defaults: {
-    theme: "system" as "light" | "dark" | "system",
-    language: "en",
-  },
-
-  // API endpoints
-  api: {
-    baseUrl: "/api",
+  app: {
+    url: process.env.NEXT_PUBLIC_APP_URL || process.env.SITE_URL || "",
   },
 }

@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils"
 import { fontSans } from "@/lib/fonts"
 import { Toaster } from "@/components/ui/toaster"
 import { FeatureTutorialButton } from "@/components/feature-tutorial-button"
+import { EnvDebug } from "@/components/debug/env-debug"
+import { SupabaseInitializer } from "@/components/supabase-initializer"
 
 export const metadata: Metadata = {
   title: "Utility Hub",
@@ -54,6 +56,9 @@ export default function RootLayout({ children }: Props) {
   return (
     <html lang="en" suppressHydrationWarning data-theme-color="blue">
       <body className={cn("min-h-screen bg-background font-sans antialiased", fontSans.variable)}>
+        {/* Initialize Supabase as early as possible */}
+        <SupabaseInitializer />
+
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AuthProvider>
             <ClientLayout>
@@ -66,6 +71,7 @@ export default function RootLayout({ children }: Props) {
         </ThemeProvider>
         {/* Feature tutorial button */}
         <FeatureTutorialButton />
+        {process.env.NODE_ENV === "development" && <EnvDebug />}
       </body>
     </html>
   )
