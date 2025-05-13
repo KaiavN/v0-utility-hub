@@ -266,8 +266,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("Logging in with Google, redirect URL:", `${siteUrl}/auth/callback`)
 
       // Generate a random state parameter to prevent CSRF attacks
-      const stateParam = Math.random().toString(36).substring(2, 15)
+      // Use a simple random string that doesn't need encoding
+      const stateParam = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+
+      // Store in sessionStorage for verification in the callback
       sessionStorage.setItem("oauthState", stateParam)
+      console.log("Generated OAuth state:", stateParam)
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",

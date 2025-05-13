@@ -21,6 +21,10 @@ export function GoogleLoginButton({ className = "", variant = "default", size = 
     try {
       setIsClicked(true)
       console.log("Google login button clicked")
+
+      // Clear any existing OAuth state before starting a new flow
+      sessionStorage.removeItem("oauthState")
+
       await loginWithGoogle()
       // No need to reset isClicked as we'll be redirected to Google
     } catch (error) {
