@@ -1,60 +1,47 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useMemo } from "react"
+import { useState } from "react"
 import { useMessaging } from "@/contexts/messaging-context"
-import { formatDistanceToNow } from "date-fns"
-import { Search, Plus, Trash2, AlertCircle } from "lucide-react"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { useAuth } from "@/contexts/auth-context"
-import { toast } from "@/components/ui/use-toast"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Search, Plus, Loader2 } from "lucide-react"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { cn } from "@/lib/utils"
 
 export function ConversationList() {
-  const { state, setActiveConversation, deleteConversation, refreshConversations } = useMessaging()
+  const { state, setActiveConversation, createConversation } = useMessaging()
   const { user } = useAuth()
-  const [searchQuery, setSearchQuery] = useState("")
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [conversationToDelete, setConversationToDelete] = useState<string | null>(null)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [newRecipientId, setNewRecipientId] = useState("")
+  const [newMessage, setNewMessage] = useState("")
+  const [isCreating, setIsCreating] = useState(false)
 
-  const filteredConversations = useMemo(() => {
-    return state.conversations.filter((conversation) =>
-      conversation.participantName.toLowerCase().includes(searchQuery.toLowerCase()),
-    )
-  }, [state.conversations, searchQuery])
+  // Force render empty state instead of loading
+  const isLoading = false // Override loading state
+  const { conversations } = state
 
-  const handleSelectConversation = (conversationId: string) => {
-    setActiveConversation(conversationId)
-  }
+  const filteredConversations = conversations.filter((conversation) =>
+    conversation.participantName.toLowerCase().includes(searchTerm.toLowerCase()),
+  )
 
-  const handleDeleteClick = (e: React.MouseEvent, conversationId: string) => {
-    e.stopPropagation()
-    setConversationToDelete(conversationId)
-    setDeleteDialogOpen(true)
-  }
+  const handleCreateConversation = async () => {
+    if (!newRecipientId) return
 
-  const confirmDelete = async () => {
-    if (conversationToDelete) {
-      const success = await deleteConversation(conversationToDelete)
-      if (success) {
-        setDeleteDialogOpen(false)
-        setConversationToDelete(null)
-        await refreshConversations()
+    setIsCreating(true)
+    try {
+      const conversationId = await createConversation(newRecipientId, newMessage)
+      if (conversationId) {
+        setActiveConversation(conversationId)
+        setIsCreateDialogOpen(false)
+        setNewRecipientId("")
+        setNewMessage("")
       }
+    } finally {
+      setIsCreating(false)
     }
   }
 
@@ -68,134 +55,114 @@ export function ConversationList() {
       .substring(0, 2)
   }
 
-  const formatTimestamp = (timestamp?: string) => {
-    if (!timestamp) return ""
-    try {
-      return formatDistanceToNow(new Date(timestamp), { addSuffix: true })
-    } catch (error) {
-      console.error("Invalid date format:", timestamp)
-      return ""
-    }
-  }
-
-  const handleCreateNewConversation = () => {
-    // This would typically open a dialog to select a user
-    toast({
-      title: "Create Conversation",
-      description: "This feature will be implemented soon!",
-    })
-  }
-
-  if (state.error) {
-    return (
-      <div className="flex flex-col h-full border-r">
-        <div className="p-4 text-center">
-          <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-2" />
-          <h3 className="font-medium mb-1">Error Loading Conversations</h3>
-          <p className="text-sm text-muted-foreground mb-4">{state.error}</p>
-          <Button onClick={() => refreshConversations()} variant="outline" size="sm">
-            Try Again
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="flex flex-col h-full border-r">
       <div className="p-4 border-b">
-        <div className="relative mb-2">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search conversations..."
-            className="pl-8"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="Search conversations..."
+              className="pl-8"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="icon" variant="outline">
+                <Plus className="h-4 w-4" />
+                <span className="sr-only">New conversation</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>New Conversation</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <label htmlFor="recipient" className="text-sm font-medium">
+                    Recipient ID
+                  </label>
+                  <Input
+                    id="recipient"
+                    placeholder="Enter user ID"
+                    value={newRecipientId}
+                    onChange={(e) => setNewRecipientId(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="message" className="text-sm font-medium">
+                    Message (optional)
+                  </label>
+                  <Input
+                    id="message"
+                    placeholder="Type your message..."
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                  />
+                </div>
+                <Button className="w-full" onClick={handleCreateConversation} disabled={!newRecipientId || isCreating}>
+                  {isCreating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    "Start Conversation"
+                  )}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
-        <Button onClick={handleCreateNewConversation} variant="outline" size="sm" className="w-full">
-          <Plus className="h-4 w-4 mr-2" />
-          New Conversation
-        </Button>
       </div>
 
       <ScrollArea className="flex-1">
-        {state.isLoading && filteredConversations.length === 0 ? (
-          <div className="p-4 text-center text-muted-foreground">Loading conversations...</div>
+        {isLoading ? (
+          <div className="flex items-center justify-center h-32">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
         ) : filteredConversations.length === 0 ? (
           <div className="p-4 text-center text-muted-foreground">
-            {searchQuery ? "No conversations match your search" : "No conversations yet"}
-            {!searchQuery && <p className="text-sm mt-1">Start a new conversation using the button above</p>}
+            <p>No conversations yet</p>
+            <p className="text-sm">Start a new conversation by clicking the + button</p>
           </div>
         ) : (
           <div className="space-y-1 p-2">
             {filteredConversations.map((conversation) => (
-              <Button
+              <button
                 key={conversation.id}
-                variant="ghost"
-                className={`w-full justify-start px-2 py-3 h-auto group ${
-                  state.activeConversation === conversation.id ? "bg-muted" : ""
-                }`}
-                onClick={() => handleSelectConversation(conversation.id)}
+                className={cn(
+                  "flex items-center gap-3 w-full p-2 rounded-md hover:bg-accent text-left",
+                  state.activeConversation === conversation.id && "bg-accent",
+                )}
+                onClick={() => setActiveConversation(conversation.id)}
               >
-                <div className="flex items-center w-full">
-                  <Avatar className="h-9 w-9 mr-3">
-                    <AvatarImage src={`/api/avatar/${conversation.participantId}`} alt={conversation.participantName} />
-                    <AvatarFallback>{getInitials(conversation.participantName)}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 overflow-hidden">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium truncate">{conversation.participantName || "Unknown"}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {formatTimestamp(conversation.lastMessageTimestamp)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="text-sm text-muted-foreground truncate">
-                        {conversation.lastMessage || "No messages yet"}
-                      </span>
-                      {conversation.unreadCount > 0 && (
-                        <Badge variant="default" className="ml-2">
-                          {conversation.unreadCount}
-                        </Badge>
-                      )}
-                    </div>
+                <Avatar className="h-10 w-10 flex-shrink-0">
+                  <AvatarImage src={`/api/avatar/${conversation.participantId}`} alt={conversation.participantName} />
+                  <AvatarFallback>{getInitials(conversation.participantName || "")}</AvatarFallback>
+                </Avatar>
+                <div className="flex-1 overflow-hidden">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium truncate">{conversation.participantName || "Unknown"}</span>
+                    <span className="text-xs text-muted-foreground">{conversation.lastMessageTime}</span>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity ml-2"
-                    onClick={(e) => handleDeleteClick(e, conversation.id)}
-                  >
-                    <Trash2 className="h-4 w-4 text-muted-foreground" />
-                    <span className="sr-only">Delete conversation</span>
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-muted-foreground truncate">{conversation.lastMessage}</span>
+                    {conversation.unreadCount > 0 && (
+                      <span className="flex-shrink-0 h-5 w-5 bg-primary text-primary-foreground rounded-full text-xs flex items-center justify-center">
+                        {conversation.unreadCount}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </Button>
+              </button>
             ))}
           </div>
         )}
       </ScrollArea>
-
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Conversation</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete this conversation and all its messages. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }
