@@ -9,23 +9,49 @@ import { TypingIndicator } from "./typing-indicator"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { AlertCircle, ArrowLeft, MoreVertical, Info } from "lucide-react"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { AlertCircle, ArrowLeft, MoreVertical, Users, Ban, LogOut, Shield } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { format } from "date-fns"
 import { Skeleton } from "@/components/ui/skeleton"
+import { GroupMembersDialog } from "./group-members-dialog"
+import { BlockUserDialog } from "./block-user-dialog"
+import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 export function ConversationView() {
-  const { state, setActiveConversation, deleteConversation } = useMessaging()
+  const { state, setActiveConversation, deleteConversation, leaveGroup, isGroupAdmin, getGroupMembers } = useMessaging()
   const { user } = useAuth()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [showBackButton, setShowBackButton] = useState(false)
   const [showDateDivider, setShowDateDivider] = useState<Record<string, boolean>>({})
+  const [showGroupMembersDialog, setShowGroupMembersDialog] = useState(false)
+  const [showBlockDialog, setShowBlockDialog] = useState(false)
+  const [showLeaveDialog, setShowLeaveDialog] = useState(false)
+  const [memberCount, setMemberCount] = useState(0)
 
   const { activeConversation } = state
   const conversation = activeConversation ? state.conversations.find((c) => c.id === activeConversation) : null
   const conversationMessages =
     activeConversation && state.messages[activeConversation] ? state.messages[activeConversation] : []
+
+  const isGroup = conversation?.type === "group"
+  const isAdmin = isGroup && isGroupAdmin(activeConversation as string)
 
   // Handle responsive back button
   useEffect(() => {
@@ -37,6 +63,15 @@ export function ConversationView() {
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
   }, [])
+
+  // Fetch member count for group chats
+  useEffect(() => {
+    if (isGroup && activeConversation) {
+      getGroupMembers(activeConversation).then((members) => {
+        setMemberCount(members.length)
+      })
+    }
+  }, [isGroup, activeConversation, getGroupMembers])
 
   // Scroll to bottom when messages change or typing status changes
   useEffect(() => {
@@ -70,7 +105,20 @@ export function ConversationView() {
     }
   }
 
-  const getInitials = (name: string) => {
+  const handleLeaveGroup = async () => {
+    if (!activeConversation) return
+
+    try {
+      const success = await leaveGroup(activeConversation)
+      if (success) {
+        setActiveConversation(null)
+      }
+    } finally {
+      setShowLeaveDialog(false)
+    }
+  }
+
+  const getInitials = (name: string | null) => {
     if (!name) return "??"
     return name
       .split(" ")
@@ -140,16 +188,39 @@ export function ConversationView() {
             </Button>
           )}
           <Avatar className="h-10 w-10 mr-3">
-            <AvatarImage src={`/api/avatar/${conversation.participantId}`} alt={conversation.participantName} />
-            <AvatarFallback>{getInitials(conversation.participantName || "")}</AvatarFallback>
+            {isGroup ? (
+              <>
+                <AvatarImage src={conversation.avatar_url || ""} alt={conversation.name || "Group"} />
+                <AvatarFallback className="bg-primary text-primary-foreground">
+                  <Users className="h-5 w-5" />
+                </AvatarFallback>
+              </>
+            ) : (
+              <>
+                <AvatarImage src={`/api/avatar/${conversation.participantId}`} alt={conversation.participantName} />
+                <AvatarFallback>{getInitials(conversation.participantName || "")}</AvatarFallback>
+              </>
+            )}
           </Avatar>
           <div>
-            <h3 className="font-medium">{conversation.participantName || "Unknown"}</h3>
-            {conversation.unreadCount > 0 && (
+            <h3 className="font-medium flex items-center">
+              {isGroup ? conversation.name : conversation.participantName || "Unknown"}
+
+              {isGroup && isAdmin && (
+                <Badge variant="outline" className="ml-2 text-xs">
+                  <Shield className="h-3 w-3 mr-1" /> Admin
+                </Badge>
+              )}
+            </h3>
+            {isGroup ? (
+              <p className="text-xs text-muted-foreground">
+                {memberCount} {memberCount === 1 ? "member" : "members"}
+              </p>
+            ) : conversation.unreadCount > 0 ? (
               <p className="text-xs text-muted-foreground">
                 {conversation.unreadCount} unread {conversation.unreadCount === 1 ? "message" : "messages"}
               </p>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -161,13 +232,33 @@ export function ConversationView() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem>
-              <Info className="h-4 w-4 mr-2" />
-              View Profile
-            </DropdownMenuItem>
-            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={handleDeleteConversation}>
-              Delete Conversation
-            </DropdownMenuItem>
+            {isGroup ? (
+              <>
+                <DropdownMenuItem onClick={() => setShowGroupMembersDialog(true)}>
+                  <Users className="h-4 w-4 mr-2" />
+                  Group Members
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setShowLeaveDialog(true)} className="text-destructive">
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Leave Group
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <>
+                <DropdownMenuItem onClick={() => setShowBlockDialog(true)}>
+                  <Ban className="h-4 w-4 mr-2" />
+                  Block User
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={handleDeleteConversation}
+                >
+                  Delete Conversation
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -208,6 +299,52 @@ export function ConversationView() {
       </ScrollArea>
 
       <MessageComposer conversationId={activeConversation} />
+
+      {/* Group members dialog */}
+      {showGroupMembersDialog && (
+        <GroupMembersDialog
+          open={showGroupMembersDialog}
+          onOpenChange={setShowGroupMembersDialog}
+          conversationId={activeConversation}
+        />
+      )}
+
+      {/* Block user dialog */}
+      {showBlockDialog && !isGroup && conversation.participantId && (
+        <BlockUserDialog
+          open={showBlockDialog}
+          onOpenChange={setShowBlockDialog}
+          userId={conversation.participantId}
+          userName={conversation.participantName || "this user"}
+        />
+      )}
+
+      {/* Confirm leave group dialog */}
+      <AlertDialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave Group</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to leave this group? You will no longer be able to see or send messages in this
+              group.
+              {isAdmin && (
+                <p className="mt-2 text-amber-500">
+                  You are an admin. If you leave, someone else will need to be promoted to admin.
+                </p>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleLeaveGroup}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Leave Group
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

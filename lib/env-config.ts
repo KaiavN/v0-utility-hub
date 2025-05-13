@@ -21,3 +21,8 @@ export const supabaseConfig = {
 export const siteConfig = {
   url: process.env.NEXT_PUBLIC_APP_URL || process.env.SITE_URL || "",
 }
+
+// Debug configuration
+export const debugConfig = {
+  authDebug: process.env.NEXT_PUBLIC_AUTH_DEBUG === "true",
+}

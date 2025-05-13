@@ -5,7 +5,7 @@ import type React from "react"
 import { useState, useMemo } from "react"
 import { useMessaging } from "@/contexts/messaging-context"
 import { formatDistanceToNow } from "date-fns"
-import { Search, Plus, Trash2, AlertCircle } from "lucide-react"
+import { Search, Plus, Trash2, AlertCircle, Users, Ban } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -21,8 +21,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useAuth } from "@/contexts/auth-context"
 import { UserSearchDialog } from "./user-search-dialog"
+import { CreateGroupDialog } from "./create-group-dialog"
+import { BlockedUsersDialog } from "./blocked-users-dialog"
 
 export function ConversationList() {
   const { state, setActiveConversation, deleteConversation, refreshConversations } = useMessaging()
@@ -31,11 +34,19 @@ export function ConversationList() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null)
   const [userSearchOpen, setUserSearchOpen] = useState(false)
+  const [createGroupOpen, setCreateGroupOpen] = useState(false)
+  const [blockedUsersOpen, setBlockedUsersOpen] = useState(false)
+  const [showNewMenu, setShowNewMenu] = useState(false)
 
   const filteredConversations = useMemo(() => {
-    return state.conversations.filter((conversation) =>
-      conversation.participantName.toLowerCase().includes(searchQuery.toLowerCase()),
-    )
+    return state.conversations.filter((conversation) => {
+      if (conversation.type === "direct") {
+        return conversation.participantName?.toLowerCase().includes(searchQuery.toLowerCase())
+      } else {
+        // group chat
+        return conversation.name?.toLowerCase().includes(searchQuery.toLowerCase())
+      }
+    })
   }, [state.conversations, searchQuery])
 
   const handleSelectConversation = (conversationId: string) => {
@@ -79,10 +90,6 @@ export function ConversationList() {
     }
   }
 
-  const handleCreateNewConversation = () => {
-    setUserSearchOpen(true)
-  }
-
   if (state.error) {
     return (
       <div className="flex flex-col h-full border-r">
@@ -110,10 +117,38 @@ export function ConversationList() {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
-        <Button onClick={handleCreateNewConversation} variant="outline" size="sm" className="w-full">
-          <Plus className="h-4 w-4 mr-2" />
-          New Conversation
-        </Button>
+        <div className="flex space-x-2">
+          <DropdownMenu open={showNewMenu} onOpenChange={setShowNewMenu}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="flex-1">
+                <Plus className="h-4 w-4 mr-2" />
+                New
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem
+                onClick={() => {
+                  setUserSearchOpen(true)
+                  setShowNewMenu(false)
+                }}
+              >
+                New Conversation
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  setCreateGroupOpen(true)
+                  setShowNewMenu(false)
+                }}
+              >
+                <Users className="h-4 w-4 mr-2" />
+                New Group
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button variant="outline" size="sm" onClick={() => setBlockedUsersOpen(true)} title="Blocked Users">
+            <Ban className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <ScrollArea className="flex-1">
@@ -137,12 +172,30 @@ export function ConversationList() {
               >
                 <div className="flex items-center w-full">
                   <Avatar className="h-9 w-9 mr-3">
-                    <AvatarImage src={`/api/avatar/${conversation.participantId}`} alt={conversation.participantName} />
-                    <AvatarFallback>{getInitials(conversation.participantName)}</AvatarFallback>
+                    {conversation.type === "direct" ? (
+                      <>
+                        <AvatarImage
+                          src={`/api/avatar/${conversation.participantId}`}
+                          alt={conversation.participantName}
+                        />
+                        <AvatarFallback>{getInitials(conversation.participantName || "")}</AvatarFallback>
+                      </>
+                    ) : (
+                      <>
+                        <AvatarImage src={conversation.avatar_url || ""} alt={conversation.name || "Group"} />
+                        <AvatarFallback className="bg-primary text-primary-foreground">
+                          <Users className="h-5 w-5" />
+                        </AvatarFallback>
+                      </>
+                    )}
                   </Avatar>
                   <div className="flex-1 overflow-hidden">
                     <div className="flex items-center justify-between">
-                      <span className="font-medium truncate">{conversation.participantName || "Unknown"}</span>
+                      <span className="font-medium truncate">
+                        {conversation.type === "direct"
+                          ? conversation.participantName || "Unknown"
+                          : conversation.name || "Group Chat"}
+                      </span>
                       <span className="text-xs text-muted-foreground">
                         {formatTimestamp(conversation.lastMessageTimestamp)}
                       </span>
@@ -195,6 +248,8 @@ export function ConversationList() {
       </AlertDialog>
 
       <UserSearchDialog open={userSearchOpen} onOpenChange={setUserSearchOpen} />
+      <CreateGroupDialog open={createGroupOpen} onOpenChange={setCreateGroupOpen} />
+      <BlockedUsersDialog open={blockedUsersOpen} onOpenChange={setBlockedUsersOpen} />
     </div>
   )
 }

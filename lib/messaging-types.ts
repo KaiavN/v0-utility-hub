@@ -11,9 +11,14 @@ export interface Message {
 
 export interface Conversation {
   id: string
-  title: string | null
+  type: "direct" | "group"
+  name: string | null
+  description: string | null
+  avatar_url: string | null
+  created_by: string | null
   created_at: string
   updated_at: string
+  is_group: boolean
 }
 
 export interface Profile {
@@ -23,14 +28,30 @@ export interface Profile {
   email: string | null
 }
 
+export interface ConversationMember {
+  user_id: string
+  conversation_id: string
+  role: "admin" | "member"
+  joined_at: string
+  profile?: Profile
+}
+
 export interface ConversationWithParticipants extends Conversation {
-  participants: Profile[]
+  members: ConversationMember[]
 }
 
 export interface ConversationSummary {
   id: string
-  participantId: string
-  participantName: string
+  type: "direct" | "group"
+  // For direct chats
+  participantId?: string
+  participantName?: string
+  // For group chats
+  name?: string
+  description?: string
+  avatar_url?: string
+  memberCount?: number
+  // Common properties
   lastMessage: string | null
   lastMessageTimestamp: string | null
   unreadCount: number
@@ -44,4 +65,15 @@ export interface MessagingState {
   isLoading: boolean
   error: string | null
   typingUsers: Record<string, boolean>
+  blockedUsers: string[]
+  groupMembers: Record<string, ConversationMember[]>
 }
+
+export interface BlockedUser {
+  blocker_id: string
+  blocked_id: string
+  blocked_user?: Profile
+  created_at: string
+}
+
+export type GroupMember = ConversationMember

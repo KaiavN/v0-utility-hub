@@ -1,11 +1,17 @@
 "use client"
 
 import type React from "react"
-import { createContext, useContext, useEffect, useCallback, useReducer } from "react"
+import { createContext, useContext, useEffect, useCallback, useReducer, useRef } from "react"
 import { createSupabaseClient } from "@/lib/supabase-client"
 import { useAuth } from "@/contexts/auth-context"
 import { toast } from "@/components/ui/use-toast"
-import type { Message, ConversationSummary, MessagingState } from "@/lib/messaging-types"
+import type {
+  Message,
+  ConversationSummary,
+  MessagingState,
+  ConversationMember,
+  BlockedUser,
+} from "@/lib/messaging-types"
 
 // Action types for the reducer
 type MessagingAction =
@@ -16,6 +22,8 @@ type MessagingAction =
   | { type: "SET_LOADING"; payload: boolean }
   | { type: "SET_ERROR"; payload: string | null }
   | { type: "SET_TYPING"; payload: { conversationId: string; isTyping: boolean } }
+  | { type: "SET_BLOCKED_USERS"; payload: string[] }
+  | { type: "SET_GROUP_MEMBERS"; payload: { conversationId: string; members: ConversationMember[] } }
   | { type: "RESET" }
 
 // Initial state
@@ -26,6 +34,8 @@ const initialState: MessagingState = {
   isLoading: false,
   error: null,
   typingUsers: {},
+  blockedUsers: [],
+  groupMembers: {},
 }
 
 // Reducer function
@@ -74,6 +84,16 @@ function messagingReducer(state: MessagingState, action: MessagingAction): Messa
           [action.payload.conversationId]: action.payload.isTyping,
         },
       }
+    case "SET_BLOCKED_USERS":
+      return { ...state, blockedUsers: action.payload }
+    case "SET_GROUP_MEMBERS":
+      return {
+        ...state,
+        groupMembers: {
+          ...state.groupMembers,
+          [action.payload.conversationId]: action.payload.members,
+        },
+      }
     case "RESET":
       return initialState
     default:
@@ -86,11 +106,26 @@ interface MessagingContextType {
   sendMessage: (content: string, conversationId?: string) => Promise<boolean>
   setActiveConversation: (conversationId: string | null) => void
   createConversation: (participantId: string, initialMessage?: string) => Promise<string | null>
+  createGroupConversation: (
+    name: string,
+    description: string,
+    avatarUrl: string | null,
+    memberIds: string[],
+  ) => Promise<string | null>
   refreshConversations: () => Promise<void>
   markMessagesAsRead: (conversationId: string) => Promise<void>
   deleteConversation: (conversationId: string) => Promise<boolean>
   setTypingStatus: (conversationId: string, isTyping: boolean) => Promise<void>
   clearError: () => void
+  blockUser: (userId: string) => Promise<boolean>
+  unblockUser: (userId: string) => Promise<boolean>
+  getBlockedUsers: () => Promise<BlockedUser[]>
+  blockedUsers: string[]
+  addGroupMember: (conversationId: string, userId: string) => Promise<boolean>
+  removeGroupMember: (conversationId: string, userId: string) => Promise<boolean>
+  leaveGroup: (conversationId: string) => Promise<boolean>
+  getGroupMembers: (conversationId: string) => Promise<ConversationMember[]>
+  isGroupAdmin: (conversationId: string) => boolean
 }
 
 const MessagingContext = createContext<MessagingContextType | undefined>(undefined)
@@ -100,10 +135,410 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(messagingReducer, initialState)
   const supabase = createSupabaseClient()
 
+  // useRef to hold the latest refreshConversations function
+  // This is to avoid the "use before declaration" error
+  const refreshConversationsRef = useRef(null)
+
   // Clear error
   const clearError = useCallback(() => {
     dispatch({ type: "SET_ERROR", payload: null })
   }, [])
+
+  // Set typing status
+  const setTypingStatus = useCallback(
+    async (conversationId: string, isTyping: boolean) => {
+      if (!isAuthenticated || !user?.id || !conversationId) {
+        return
+      }
+
+      try {
+        // Update typing status in the database
+        const { error } = await supabase.rpc("update_typing_status", {
+          p_conversation_id: conversationId,
+          p_user_id: user.id,
+          p_is_typing: isTyping,
+        })
+
+        if (error) {
+          console.error("Error updating typing status:", error)
+        }
+      } catch (err) {
+        console.error("Unexpected error updating typing status:", err)
+      }
+    },
+    [isAuthenticated, user, supabase],
+  )
+
+  // Fetch blocked users
+  const fetchBlockedUsers = useCallback(async () => {
+    if (!isAuthenticated || !user?.id) {
+      return []
+    }
+
+    try {
+      const { data, error } = await supabase.from("blocked_users").select("blocked_id").eq("blocker_id", user.id)
+
+      if (error) {
+        console.error("Error fetching blocked users:", error)
+        return []
+      }
+
+      const blockedIds = data.map((b) => b.blocked_id)
+      dispatch({ type: "SET_BLOCKED_USERS", payload: blockedIds })
+      return blockedIds
+    } catch (err) {
+      console.error("Unexpected error fetching blocked users:", err)
+      return []
+    }
+  }, [isAuthenticated, user, supabase])
+
+  // Block a user
+  const blockUser = useCallback(
+    async (userId: string): Promise<boolean> => {
+      if (!isAuthenticated || !user?.id) return false
+
+      try {
+        // Insert into blocked_users table
+        const { error } = await supabase.from("blocked_users").insert({
+          blocker_id: user.id,
+          blocked_id: userId,
+        })
+
+        if (error) {
+          console.error("Error blocking user:", error)
+          toast({
+            title: "Error",
+            description: "Failed to block user. Please try again.",
+            variant: "destructive",
+          })
+          return false
+        }
+
+        // Update local state
+        const updatedBlockedUsers = [...state.blockedUsers, userId]
+        dispatch({ type: "SET_BLOCKED_USERS", payload: updatedBlockedUsers })
+
+        // If this was the active conversation, clear it
+        if (
+          state.activeConversation &&
+          state.conversations.find(
+            (c) => c.id === state.activeConversation && c.type === "direct" && c.participantId === userId,
+          )
+        ) {
+          dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: null })
+        }
+
+        // Refresh conversations to hide blocked user conversations
+        await refreshConversationsRef.current()
+        return true
+      } catch (err) {
+        console.error("Unexpected error blocking user:", err)
+        return false
+      }
+    },
+    [isAuthenticated, user, supabase, state.blockedUsers, state.activeConversation, state.conversations],
+  )
+
+  // Unblock a user
+  const unblockUser = useCallback(
+    async (userId: string): Promise<boolean> => {
+      if (!isAuthenticated || !user?.id) return false
+
+      try {
+        // Delete from blocked_users table
+        const { error } = await supabase
+          .from("blocked_users")
+          .delete()
+          .eq("blocker_id", user.id)
+          .eq("blocked_id", userId)
+
+        if (error) {
+          console.error("Error unblocking user:", error)
+          toast({
+            title: "Error",
+            description: "Failed to unblock user. Please try again.",
+            variant: "destructive",
+          })
+          return false
+        }
+
+        // Update local state
+        const updatedBlockedUsers = state.blockedUsers.filter((id) => id !== userId)
+        dispatch({ type: "SET_BLOCKED_USERS", payload: updatedBlockedUsers })
+
+        // Refresh conversations to show unblocked user conversations
+        await refreshConversationsRef.current()
+        return true
+      } catch (err) {
+        console.error("Unexpected error unblocking user:", err)
+        return false
+      }
+    },
+    [isAuthenticated, user, supabase, state.blockedUsers],
+  )
+
+  // Get detailed blocked users
+  const getBlockedUsers = useCallback(async (): Promise<BlockedUser[]> => {
+    if (!isAuthenticated || !user?.id) return []
+
+    try {
+      const { data, error } = await supabase
+        .from("blocked_users")
+        .select(`
+          blocker_id,
+          blocked_id,
+          created_at,
+          blocked_user:blocked_id (
+            id,
+            display_name,
+            avatar_url,
+            email
+          )
+        `)
+        .eq("blocker_id", user.id)
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        console.error("Error fetching blocked users:", error)
+        return []
+      }
+
+      return data as BlockedUser[]
+    } catch (err) {
+      console.error("Unexpected error fetching blocked users:", err)
+      return []
+    }
+  }, [isAuthenticated, user, supabase])
+
+  // Create a group conversation
+  const createGroupConversation = useCallback(
+    async (
+      name: string,
+      description: string,
+      avatarUrl: string | null,
+      memberIds: string[],
+    ): Promise<string | null> => {
+      if (!isAuthenticated || !user?.id) {
+        toast({
+          title: "Error",
+          description: "You must be logged in to create a group",
+          variant: "destructive",
+        })
+        return null
+      }
+
+      try {
+        dispatch({ type: "SET_LOADING", payload: true })
+        clearError()
+
+        // Call the create_group_chat function
+        const { data, error } = await supabase.rpc("create_group_chat", {
+          group_name: name,
+          group_description: description,
+          avatar_url: avatarUrl,
+          member_ids: memberIds,
+        })
+
+        if (error) {
+          console.error("Error creating group:", error)
+          throw new Error(error.message)
+        }
+
+        const conversationId = data
+
+        // Refresh conversations
+        await refreshConversationsRef.current()
+
+        // Set this as the active conversation
+        dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: conversationId })
+
+        return conversationId
+      } catch (err) {
+        console.error("Error creating group conversation:", err)
+        dispatch({
+          type: "SET_ERROR",
+          payload: err instanceof Error ? err.message : "Failed to create group",
+        })
+        toast({
+          title: "Error",
+          description: "Failed to create group. Please try again.",
+          variant: "destructive",
+        })
+        return null
+      } finally {
+        dispatch({ type: "SET_LOADING", payload: false })
+      }
+    },
+    [isAuthenticated, user, supabase, clearError],
+  )
+
+  // Get group members
+  const getGroupMembers = useCallback(
+    async (conversationId: string): Promise<ConversationMember[]> => {
+      if (!isAuthenticated || !user?.id) return []
+
+      // Check if we already have the members in state
+      if (state.groupMembers[conversationId]) {
+        return state.groupMembers[conversationId]
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from("conversation_members")
+          .select(`
+          user_id,
+          conversation_id,
+          role,
+          joined_at,
+          profile:user_id (
+            id,
+            display_name,
+            avatar_url,
+            email
+          )
+        `)
+          .eq("conversation_id", conversationId)
+          .order("role", { ascending: false }) // Admins first
+          .order("joined_at", { ascending: true })
+
+        if (error) {
+          console.error("Error fetching group members:", error)
+          return []
+        }
+
+        const members = data as ConversationMember[]
+
+        // Store in state
+        dispatch({
+          type: "SET_GROUP_MEMBERS",
+          payload: { conversationId, members },
+        })
+
+        return members
+      } catch (err) {
+        console.error("Unexpected error fetching group members:", err)
+        return []
+      }
+    },
+    [isAuthenticated, user, supabase, state.groupMembers],
+  )
+
+  // Check if user is a group admin
+  const isGroupAdmin = useCallback(
+    (conversationId: string): boolean => {
+      if (!conversationId || !user?.id) return false
+
+      // Check if we have the members in state
+      const members = state.groupMembers[conversationId] || []
+      const userMember = members.find((m) => m.user_id === user.id)
+      return userMember?.role === "admin"
+    },
+    [user, state.groupMembers],
+  )
+
+  // Add a member to a group
+  const addGroupMember = useCallback(
+    async (conversationId: string, userId: string): Promise<boolean> => {
+      if (!isAuthenticated || !user?.id) return false
+
+      try {
+        // Check if user is admin
+        if (!isGroupAdmin(conversationId)) {
+          toast({
+            title: "Error",
+            description: "Only group admins can add members",
+            variant: "destructive",
+          })
+          return false
+        }
+
+        // Add member
+        const { error } = await supabase.from("conversation_members").insert({
+          conversation_id: conversationId,
+          user_id: userId,
+        })
+
+        if (error) {
+          console.error("Error adding group member:", error)
+          toast({
+            title: "Error",
+            description: "Failed to add member to group. Please try again.",
+            variant: "destructive",
+          })
+          return false
+        }
+
+        // Refresh members
+        await getGroupMembers(conversationId)
+        return true
+      } catch (err) {
+        console.error("Unexpected error adding group member:", err)
+        return false
+      }
+    },
+    [isAuthenticated, user, supabase, isGroupAdmin, getGroupMembers],
+  )
+
+  // Remove a member from a group
+  const removeGroupMember = useCallback(
+    async (conversationId: string, userId: string): Promise<boolean> => {
+      if (!isAuthenticated || !user?.id) return false
+
+      try {
+        // Check if user is admin or removing self
+        if (!isGroupAdmin(conversationId) && userId !== user.id) {
+          toast({
+            title: "Error",
+            description: "Only group admins can remove members",
+            variant: "destructive",
+          })
+          return false
+        }
+
+        // Remove member
+        const { error } = await supabase
+          .from("conversation_members")
+          .delete()
+          .eq("conversation_id", conversationId)
+          .eq("user_id", userId)
+
+        if (error) {
+          console.error("Error removing group member:", error)
+          toast({
+            title: "Error",
+            description: "Failed to remove member from group. Please try again.",
+            variant: "destructive",
+          })
+          return false
+        }
+
+        // If removing self, set active conversation to null
+        if (userId === user.id) {
+          dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: null })
+          await refreshConversationsRef.current()
+        } else {
+          // Refresh members
+          await getGroupMembers(conversationId)
+        }
+
+        return true
+      } catch (err) {
+        console.error("Unexpected error removing group member:", err)
+        return false
+      }
+    },
+    [isAuthenticated, user, supabase, isGroupAdmin, getGroupMembers],
+  )
+
+  // Leave a group
+  const leaveGroup = useCallback(
+    async (conversationId: string): Promise<boolean> => {
+      if (!isAuthenticated || !user?.id) return false
+
+      return removeGroupMember(conversationId, user.id)
+    },
+    [isAuthenticated, user, removeGroupMember],
+  )
 
   // Fetch conversations
   const fetchConversations = useCallback(async () => {
@@ -115,21 +550,138 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: "SET_LOADING", payload: true })
       clearError()
 
-      const response = await fetch(`/api/messages/conversations?userId=${user.id}`)
+      // First get blocked users
+      const blockedUserIds = await fetchBlockedUsers()
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to fetch conversations")
+      // Get conversations
+      const { data: conversations, error: conversationsError } = await supabase
+        .from("conversation_members")
+        .select(`
+          conversation:conversation_id (
+            id,
+            type,
+            name,
+            description,
+            avatar_url,
+            created_by
+          ),
+          user_id
+        `)
+        .eq("user_id", user.id)
+
+      if (conversationsError) {
+        console.error("Error fetching conversations:", conversationsError)
+        dispatch({ type: "SET_ERROR", payload: conversationsError.message })
+        return
       }
 
-      const data = await response.json()
+      // Prepare a list of unique conversation IDs
+      const conversationIds = conversations.map((c) => c.conversation.id)
 
-      if (Array.isArray(data.conversations)) {
-        dispatch({ type: "SET_CONVERSATIONS", payload: data.conversations })
-      } else {
-        console.error("Invalid conversations data:", data)
-        dispatch({ type: "SET_CONVERSATIONS", payload: [] })
+      // For each conversation ID, get the last message and unread count
+      const conversationSummaries: ConversationSummary[] = []
+
+      for (const conversationId of conversationIds) {
+        try {
+          // Get the conversation details
+          const { data: conversationData, error: convError } = await supabase
+            .from("conversations")
+            .select("*")
+            .eq("id", conversationId)
+            .single()
+
+          if (convError) {
+            console.error(`Error fetching conversation ${conversationId}:`, convError)
+            continue
+          }
+
+          const conversation = conversationData
+
+          // Handle different conversation types
+          const conversationSummary: Partial<ConversationSummary> = {
+            id: conversationId,
+            type: conversation.type as "direct" | "group",
+            lastMessage: null,
+            lastMessageTimestamp: null,
+            unreadCount: 0,
+          }
+
+          // For direct chats, get the other participant
+          if (conversation.type === "direct") {
+            // Get the other participant
+            const { data: otherParticipant, error: partError } = await supabase
+              .from("conversation_members")
+              .select("user_id, profiles:user_id(display_name, email)")
+              .eq("conversation_id", conversationId)
+              .neq("user_id", user.id)
+              .single()
+
+            if (partError) {
+              console.error(`Error fetching other participant for ${conversationId}:`, partError)
+              continue
+            }
+
+            // Skip if other participant is blocked
+            if (blockedUserIds.includes(otherParticipant.user_id)) {
+              continue
+            }
+
+            conversationSummary.participantId = otherParticipant.user_id
+            conversationSummary.participantName =
+              otherParticipant.profiles?.display_name ||
+              otherParticipant.profiles?.email ||
+              `User ${otherParticipant.user_id.substring(0, 5)}`
+          } else {
+            // For group chats, use the group name
+            conversationSummary.name = conversation.name
+            conversationSummary.description = conversation.description
+            conversationSummary.avatar_url = conversation.avatar_url
+          }
+
+          // Get the latest message
+          const { data: latestMessages, error: msgError } = await supabase
+            .from("messages")
+            .select("*")
+            .eq("conversation_id", conversationId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+
+          if (msgError) {
+            console.error(`Error fetching latest message for ${conversationId}:`, msgError)
+          } else if (latestMessages && latestMessages.length > 0) {
+            conversationSummary.lastMessage = latestMessages[0].content
+            conversationSummary.lastMessageTimestamp = latestMessages[0].created_at
+          }
+
+          // Get unread count
+          const { count: unreadCount, error: countError } = await supabase
+            .from("messages")
+            .select("*", { count: "exact", head: true })
+            .eq("conversation_id", conversationId)
+            .eq("read", false)
+            .neq("sender_id", user.id)
+
+          if (countError) {
+            console.error(`Error fetching unread count for ${conversationId}:`, countError)
+          } else {
+            conversationSummary.unreadCount = unreadCount || 0
+          }
+
+          conversationSummaries.push(conversationSummary as ConversationSummary)
+        } catch (error) {
+          console.error(`Error processing conversation ${conversationId}:`, error)
+          // Continue with other conversations
+        }
       }
+
+      // Sort by latest message
+      conversationSummaries.sort((a, b) => {
+        if (!a.lastMessageTimestamp) return 1
+        if (!b.lastMessageTimestamp) return -1
+        return new Date(b.lastMessageTimestamp).getTime() - new Date(a.lastMessageTimestamp).getTime()
+      })
+
+      dispatch({ type: "SET_CONVERSATIONS", payload: conversationSummaries })
     } catch (err) {
       console.error("Error fetching conversations:", err)
       dispatch({ type: "SET_ERROR", payload: err instanceof Error ? err.message : "Failed to load conversations" })
@@ -141,12 +693,17 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     } finally {
       dispatch({ type: "SET_LOADING", payload: false })
     }
-  }, [isAuthenticated, user, clearError])
+  }, [isAuthenticated, user, supabase, clearError, fetchBlockedUsers])
 
   // Refresh conversations
   const refreshConversations = useCallback(async () => {
     await fetchConversations()
   }, [fetchConversations])
+
+  // Assign refreshConversations to the ref
+  useEffect(() => {
+    refreshConversationsRef.current = refreshConversations
+  }, [refreshConversations])
 
   // Fetch messages for a conversation
   const fetchMessages = useCallback(
@@ -159,6 +716,20 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "SET_LOADING", payload: true })
         clearError()
 
+        // Get conversation type
+        const { data: conversationData, error: convError } = await supabase
+          .from("conversations")
+          .select("type")
+          .eq("id", conversationId)
+          .single()
+
+        if (convError) {
+          console.error("Error fetching conversation type:", convError)
+          dispatch({ type: "SET_ERROR", payload: convError.message })
+          return
+        }
+
+        // Fetch messages
         const { data, error } = await supabase
           .from("messages")
           .select(
@@ -200,6 +771,11 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           type: "SET_MESSAGES",
           payload: { conversationId, messages: formattedMessages },
         })
+
+        // If it's a group chat, fetch members
+        if (conversationData.type === "group") {
+          await getGroupMembers(conversationId)
+        }
       } catch (err) {
         console.error("Unexpected error fetching messages:", err)
         dispatch({
@@ -210,7 +786,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "SET_LOADING", payload: false })
       }
     },
-    [isAuthenticated, user, supabase, clearError],
+    [isAuthenticated, user, supabase, clearError, getGroupMembers],
   )
 
   // Set active conversation
@@ -284,7 +860,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Refresh conversations to update last message
-        refreshConversations()
+        refreshConversationsRef.current()
         return true
       } catch (err) {
         console.error("Unexpected error sending message:", err)
@@ -302,7 +878,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "SET_LOADING", payload: false })
       }
     },
-    [isAuthenticated, user, state.activeConversation, supabase, refreshConversations, clearError],
+    [isAuthenticated, user, state.activeConversation, supabase, clearError, setTypingStatus],
   )
 
   // Create a new conversation
@@ -327,18 +903,28 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         return null
       }
 
+      // Don't create conversation with blocked users
+      if (state.blockedUsers.includes(participantId)) {
+        toast({
+          title: "Error",
+          description: "You cannot message a blocked user. Unblock them first.",
+          variant: "destructive",
+        })
+        return null
+      }
+
       try {
         dispatch({ type: "SET_LOADING", payload: true })
         clearError()
 
         // Check if conversation already exists
         const { data: existingConversations, error: checkError } = await supabase
-          .from("conversation_participants")
+          .from("conversation_members")
           .select("conversation_id")
           .eq("user_id", user.id)
           .in(
             "conversation_id",
-            supabase.from("conversation_participants").select("conversation_id").eq("user_id", participantId),
+            supabase.from("conversation_members").select("conversation_id").eq("user_id", participantId),
           )
 
         if (checkError) {
@@ -346,10 +932,26 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           throw new Error(checkError.message)
         }
 
-        // If conversation exists, return it
+        // Filter to only direct conversations
+        let existingConversationId = null
         if (existingConversations && existingConversations.length > 0) {
-          const existingConversationId = existingConversations[0].conversation_id
+          for (const conv of existingConversations) {
+            const { data: convData } = await supabase
+              .from("conversations")
+              .select("id, type")
+              .eq("id", conv.conversation_id)
+              .eq("type", "direct")
+              .single()
 
+            if (convData) {
+              existingConversationId = convData.id
+              break
+            }
+          }
+        }
+
+        // If conversation exists, return it
+        if (existingConversationId) {
           // If there's an initial message, send it
           if (initialMessage) {
             await sendMessage(initialMessage, existingConversationId)
@@ -361,7 +963,9 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         // Create the conversation
         const { data: conversationData, error: conversationError } = await supabase
           .from("conversations")
-          .insert({})
+          .insert({
+            type: "direct",
+          })
           .select()
           .single()
 
@@ -371,14 +975,12 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Add participants
-        const participantsToInsert = [
+        const membersToInsert = [
           { conversation_id: conversationData.id, user_id: user.id },
           { conversation_id: conversationData.id, user_id: participantId },
         ]
 
-        const { error: participantsError } = await supabase
-          .from("conversation_participants")
-          .insert(participantsToInsert)
+        const { error: participantsError } = await supabase.from("conversation_members").insert(membersToInsert)
 
         if (participantsError) {
           console.error("Error adding participants:", participantsError)
@@ -391,7 +993,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Refresh conversations
-        await refreshConversations()
+        await refreshConversationsRef.current()
         return conversationData.id
       } catch (err) {
         console.error("Error creating conversation:", err)
@@ -409,7 +1011,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "SET_LOADING", payload: false })
       }
     },
-    [isAuthenticated, user, supabase, sendMessage, refreshConversations, clearError],
+    [isAuthenticated, user, supabase, sendMessage, clearError, state.blockedUsers],
   )
 
   // Mark messages as read
@@ -442,39 +1044,39 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           })
 
           // Refresh conversations to update unread counts
-          refreshConversations()
+          refreshConversationsRef.current()
         }
       } catch (err) {
         console.error("Unexpected error marking messages as read:", err)
       }
     },
-    [isAuthenticated, user, supabase, state.messages, refreshConversations],
+    [isAuthenticated, user, supabase, state.messages],
   )
 
-  // Set typing status
-  const setTypingStatus = useCallback(
-    async (conversationId: string, isTyping: boolean) => {
-      if (!isAuthenticated || !user?.id || !conversationId) {
-        return
-      }
+  // Set typing status - DEPRECATED
+  // const setTypingStatus = useCallback(
+  //   async (conversationId: string, isTyping: boolean) => {
+  //     if (!isAuthenticated || !user?.id || !conversationId) {
+  //       return
+  //     }
 
-      try {
-        // Update typing status in the database
-        const { error } = await supabase.rpc("update_typing_status", {
-          p_conversation_id: conversationId,
-          p_user_id: user.id,
-          p_is_typing: isTyping,
-        })
+  //     try {
+  //       // Update typing status in the database
+  //       const { error } = await supabase.rpc("update_typing_status", {
+  //         p_conversation_id: conversationId,
+  //         p_user_id: user.id,
+  //         p_is_typing: isTyping,
+  //       })
 
-        if (error) {
-          console.error("Error updating typing status:", error)
-        }
-      } catch (err) {
-        console.error("Unexpected error updating typing status:", err)
-      }
-    },
-    [isAuthenticated, user, supabase],
-  )
+  //       if (error) {
+  //         console.error("Error updating typing status:", error)
+  //       }
+  //     } catch (err) {
+  //       console.error("Unexpected error updating typing status:", err)
+  //     }
+  //   },
+  //   [isAuthenticated, user, supabase],
+  // )
 
   // Delete a conversation
   const deleteConversation = useCallback(
@@ -492,6 +1094,24 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "SET_LOADING", payload: true })
         clearError()
 
+        // Check if it's a group or direct conversation
+        const { data: conversation, error: convError } = await supabase
+          .from("conversations")
+          .select("type")
+          .eq("id", conversationId)
+          .single()
+
+        if (convError) {
+          console.error("Error checking conversation type:", convError)
+          throw new Error(convError.message)
+        }
+
+        if (conversation.type === "group") {
+          // For groups, we just remove the user from the group
+          return leaveGroup(conversationId)
+        }
+
+        // For direct conversations, delete everything
         // First delete all messages in the conversation
         const { error: messagesError } = await supabase.from("messages").delete().eq("conversation_id", conversationId)
 
@@ -502,7 +1122,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
 
         // Then delete the participants
         const { error: participantsError } = await supabase
-          .from("conversation_participants")
+          .from("conversation_members")
           .delete()
           .eq("conversation_id", conversationId)
 
@@ -552,7 +1172,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "SET_LOADING", payload: false })
       }
     },
-    [isAuthenticated, user, supabase, state.activeConversation, state.conversations, clearError],
+    [isAuthenticated, user, supabase, state.activeConversation, state.conversations, clearError, leaveGroup],
   )
 
   // Reset state when user logs out
@@ -561,6 +1181,13 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: "RESET" })
     }
   }, [isAuthenticated])
+
+  // Load blocked users on initial mount
+  useEffect(() => {
+    if (isAuthenticated && user?.id) {
+      fetchBlockedUsers()
+    }
+  }, [isAuthenticated, user, fetchBlockedUsers])
 
   // Set up real-time subscription for messages
   useEffect(() => {
@@ -577,6 +1204,11 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         },
         async (payload) => {
           const newMessage = payload.new as any
+
+          // Skip messages from blocked users
+          if (state.blockedUsers.includes(newMessage.sender_id)) {
+            return
+          }
 
           // Fetch the sender info
           const { data: sender } = await supabase
@@ -605,7 +1237,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           }
 
           // Refresh conversations to update the list
-          refreshConversations()
+          refreshConversationsRef.current()
         },
       )
       .on(
@@ -630,19 +1262,79 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           }
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "blocked_users",
+        },
+        async (payload) => {
+          if (payload.new.blocker_id === user.id || payload.new.blocked_id === user.id) {
+            await fetchBlockedUsers()
+            await refreshConversationsRef.current()
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "blocked_users",
+        },
+        async (payload) => {
+          if (payload.old.blocker_id === user.id || payload.old.blocked_id === user.id) {
+            await fetchBlockedUsers()
+            await refreshConversationsRef.current()
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "conversation_members",
+        },
+        async (payload) => {
+          // Refresh conversations if there's any change to conversation members
+          await refreshConversationsRef.current()
+
+          // If this is the active conversation, refresh group members
+          if (
+            state.activeConversation === payload.new?.conversation_id ||
+            state.activeConversation === payload.old?.conversation_id
+          ) {
+            const conversationId = state.activeConversation
+            if (conversationId) {
+              await getGroupMembers(conversationId)
+            }
+          }
+        },
+      )
       .subscribe()
 
     return () => {
       supabase.removeChannel(subscription)
     }
-  }, [isAuthenticated, user, supabase, state.activeConversation, markMessagesAsRead, refreshConversations])
+  }, [
+    isAuthenticated,
+    user,
+    supabase,
+    state.activeConversation,
+    state.blockedUsers,
+    markMessagesAsRead,
+    fetchBlockedUsers,
+    getGroupMembers,
+  ])
 
   // Load conversations on initial mount
   useEffect(() => {
     if (isAuthenticated && user?.id) {
       fetchConversations()
     }
-  }, [isAuthenticated, user, fetchConversations])
+  }, [isAuthenticated, user])
 
   return (
     <MessagingContext.Provider
@@ -651,11 +1343,21 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         sendMessage,
         setActiveConversation,
         createConversation,
-        refreshConversations,
+        createGroupConversation,
+        refreshConversations: refreshConversationsRef.current,
         markMessagesAsRead,
         deleteConversation,
         setTypingStatus,
         clearError,
+        blockUser,
+        unblockUser,
+        getBlockedUsers,
+        blockedUsers: state.blockedUsers,
+        addGroupMember,
+        removeGroupMember,
+        leaveGroup,
+        getGroupMembers,
+        isGroupAdmin,
       }}
     >
       {children}

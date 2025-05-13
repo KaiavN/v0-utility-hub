@@ -1,98 +1,89 @@
 import { createClient } from "@supabase/supabase-js"
+import { supabaseConfig } from "./env-config"
+
+// Re-export createClient from @supabase/supabase-js
+export { createClient } from "@supabase/supabase-js"
 
 // Create a singleton Supabase client
 let supabaseInstance: any = null
-let supabaseConfig: { url: string; anonKey: string } | null = null
 let configPromise: Promise<{ url: string; anonKey: string }> | null = null
 
-// Function to fetch Supabase configuration from the server
-async function fetchSupabaseConfig(): Promise<{ url: string; anonKey: string }> {
-  // If we already have a promise for the config, return it
-  if (configPromise) {
-    return configPromise
+// Function to fetch Supabase configuration
+async function getSupabaseConfig() {
+  // Check if we're on the server
+  if (typeof window === "undefined") {
+    // Server-side: Use environment variables
+    const url = process.env.STORAGE_SUPABASE_URL || process.env.STORAGE_NEXT_PUBLIC_SUPABASE_URL || ""
+    const anonKey = process.env.STORAGE_NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+    const serviceKey = process.env.STORAGE_SUPABASE_SERVICE_ROLE_KEY || ""
+
+    if (!url || !anonKey) {
+      console.warn("Missing Supabase environment variables on server")
+    }
+
+    return { url, anonKey, serviceKey }
   }
 
-  // Check if we have the config in localStorage
-  if (typeof window !== "undefined") {
+  // Client-side: Try to fetch from API if needed
+  try {
+    // Check localStorage first for faster startup
     const cachedConfig = localStorage.getItem("supabaseConfig")
     if (cachedConfig) {
-      try {
-        const parsed = JSON.parse(cachedConfig)
-        if (parsed.url && parsed.anonKey) {
-          supabaseConfig = parsed
-          return parsed
-        }
-      } catch (e) {
-        console.error("Error parsing cached Supabase config:", e)
+      const parsed = JSON.parse(cachedConfig)
+      if (parsed.url && parsed.anonKey) {
+        return parsed
       }
+    }
+
+    // Fetch from API
+    const response = await fetch("/api/config/supabase")
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Supabase config: ${response.status}`)
+    }
+
+    const config = await response.json()
+    if (!config.url || !config.anonKey) {
+      throw new Error("Invalid Supabase configuration received")
+    }
+
+    // Cache for next time
+    localStorage.setItem("supabaseConfig", JSON.stringify(config))
+    return config
+  } catch (error) {
+    console.error("Error fetching Supabase config:", error)
+
+    // Fallback to hardcoded values from env-config
+    return {
+      url: supabaseConfig.publicUrl || supabaseConfig.url,
+      anonKey: supabaseConfig.publicAnonKey || supabaseConfig.anonKey,
+      serviceKey: supabaseConfig.serviceKey,
     }
   }
-
-  // Create a new promise to fetch the config
-  configPromise = new Promise(async (resolve, reject) => {
-    try {
-      console.log("Fetching Supabase configuration from server...")
-      const response = await fetch("/api/config/supabase")
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        console.error("Error fetching Supabase config:", errorData)
-        reject(new Error(`Failed to fetch Supabase config: ${response.status}`))
-        return
-      }
-
-      const config = await response.json()
-
-      if (!config.url || !config.anonKey) {
-        console.error("Invalid Supabase config received:", config)
-        reject(new Error("Invalid Supabase configuration received from server"))
-        return
-      }
-
-      // Cache the config in localStorage
-      if (typeof window !== "undefined") {
-        localStorage.setItem("supabaseConfig", JSON.stringify(config))
-      }
-
-      supabaseConfig = config
-      resolve(config)
-    } catch (error) {
-      console.error("Error fetching Supabase config:", error)
-      reject(error)
-    }
-  })
-
-  return configPromise
 }
 
-// Create a Supabase client
+// Function to create a Supabase client
 export async function createSupabaseClientAsync() {
   try {
+    // Get configuration
+    const config = await getSupabaseConfig()
+
+    // Validate config
+    if (!config.url) {
+      throw new Error("Supabase URL is required")
+    }
+
+    if (!config.anonKey) {
+      throw new Error("Supabase anon key is required")
+    }
+
     // For server-side rendering, always create a new instance
     if (typeof window === "undefined") {
-      // Server-side: Use environment variables directly
-      const supabaseUrl = process.env.STORAGE_SUPABASE_URL || process.env.STORAGE_NEXT_PUBLIC_SUPABASE_URL
-      const supabaseAnonKey = process.env.STORAGE_NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-      if (!supabaseUrl || !supabaseAnonKey) {
-        console.error("Missing Supabase environment variables for server-side")
-        console.error("URL:", supabaseUrl ? "Available" : "Missing")
-        console.error("Anon Key:", supabaseAnonKey ? "Available" : "Missing")
-        return createDummyClient()
-      }
-
-      return createClient(supabaseUrl, supabaseAnonKey)
+      return createClient(config.url, config.serviceKey || config.anonKey)
     }
 
     // For client-side, use singleton pattern
     if (!supabaseInstance) {
-      // Fetch config if we don't have it yet
-      if (!supabaseConfig) {
-        supabaseConfig = await fetchSupabaseConfig()
-      }
-
-      // Create the client
-      supabaseInstance = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+      supabaseInstance = createClient(config.url, config.anonKey, {
         auth: {
           persistSession: true,
           autoRefreshToken: true,
@@ -103,7 +94,7 @@ export async function createSupabaseClientAsync() {
     return supabaseInstance
   } catch (error) {
     console.error("Error creating Supabase client:", error)
-    return createDummyClient()
+    throw error
   }
 }
 
@@ -111,16 +102,16 @@ export async function createSupabaseClientAsync() {
 export function createSupabaseClient() {
   // For server-side rendering, always create a new instance
   if (typeof window === "undefined") {
-    // Server-side: Use environment variables directly
-    const supabaseUrl = process.env.STORAGE_SUPABASE_URL || process.env.STORAGE_NEXT_PUBLIC_SUPABASE_URL
-    const supabaseAnonKey = process.env.STORAGE_NEXT_PUBLIC_SUPABASE_ANON_KEY
+    const url = process.env.STORAGE_SUPABASE_URL || process.env.STORAGE_NEXT_PUBLIC_SUPABASE_URL || ""
+    const anonKey = process.env.STORAGE_NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+    const serviceKey = process.env.STORAGE_SUPABASE_SERVICE_ROLE_KEY || ""
 
-    if (!supabaseUrl || !supabaseAnonKey) {
-      console.error("Missing Supabase environment variables for server-side")
+    if (!url || !anonKey) {
+      console.warn("Missing Supabase environment variables on server, returning dummy client")
       return createDummyClient()
     }
 
-    return createClient(supabaseUrl, supabaseAnonKey)
+    return createClient(url, serviceKey || anonKey)
   }
 
   // For client-side, return the instance if it exists
@@ -128,40 +119,42 @@ export function createSupabaseClient() {
     return supabaseInstance
   }
 
-  // If we have the config but no instance, create it
-  if (supabaseConfig) {
-    try {
-      supabaseInstance = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-        },
-      })
-      return supabaseInstance
-    } catch (error) {
-      console.error("Error creating Supabase client with config:", error)
-      return createDummyClient()
+  // If we don't have the instance yet, try to use cached config
+  try {
+    const cachedConfig = localStorage.getItem("supabaseConfig")
+    if (cachedConfig) {
+      const config = JSON.parse(cachedConfig)
+      if (config.url && config.anonKey) {
+        supabaseInstance = createClient(config.url, config.anonKey, {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+          },
+        })
+        return supabaseInstance
+      }
     }
+  } catch (e) {
+    console.error("Error using cached config:", e)
   }
 
-  // If we don't have the config yet, start fetching it and return a dummy client
+  // If we don't have the config yet, start fetching it
   if (!configPromise) {
-    fetchSupabaseConfig()
+    configPromise = getSupabaseConfig()
       .then((config) => {
-        supabaseConfig = config
-        try {
+        if (config.url && config.anonKey) {
           supabaseInstance = createClient(config.url, config.anonKey, {
             auth: {
               persistSession: true,
               autoRefreshToken: true,
             },
           })
-        } catch (error) {
-          console.error("Error creating Supabase client after fetching config:", error)
         }
+        return config
       })
       .catch((error) => {
         console.error("Error fetching Supabase config:", error)
+        return { url: "", anonKey: "" }
       })
   }
 
@@ -172,30 +165,25 @@ export function createSupabaseClient() {
 
 // Create a Supabase admin client (server-side only)
 export function createSupabaseAdmin() {
-  try {
-    if (typeof window !== "undefined") {
-      console.error("Admin client should only be used server-side")
-      return createDummyClient()
-    }
-
-    const supabaseUrl = process.env.STORAGE_SUPABASE_URL || process.env.STORAGE_NEXT_PUBLIC_SUPABASE_URL
-    const supabaseServiceKey = process.env.STORAGE_SUPABASE_SERVICE_ROLE_KEY
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      console.error("Missing Supabase admin environment variables")
-      return createDummyClient()
-    }
-
-    return createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    })
-  } catch (error) {
-    console.error("Error creating Supabase admin client:", error)
+  if (typeof window !== "undefined") {
+    console.error("Admin client should only be used server-side")
     return createDummyClient()
   }
+
+  const url = process.env.STORAGE_SUPABASE_URL || process.env.STORAGE_NEXT_PUBLIC_SUPABASE_URL || ""
+  const serviceKey = process.env.STORAGE_SUPABASE_SERVICE_ROLE_KEY || ""
+
+  if (!url || !serviceKey) {
+    console.error("Missing Supabase admin environment variables")
+    return createDummyClient()
+  }
+
+  return createClient(url, serviceKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  })
 }
 
 // Create a dummy client that won't crash the app
@@ -206,6 +194,13 @@ function createDummyClient() {
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
       signInWithOAuth: () => Promise.resolve({ error: new Error("Supabase client not initialized") }),
       signOut: () => Promise.resolve({ error: null }),
+      signUp: () => Promise.resolve({ error: null }),
+      signInWithPassword: () => Promise.resolve({ error: null }),
+      resetPasswordForEmail: () => Promise.resolve({ error: null }),
+      updateUser: () => Promise.resolve({ error: null }),
+      admin: {
+        deleteUser: () => Promise.resolve({ error: null }),
+      },
       exchangeCodeForSession: () => Promise.resolve({ data: null, error: null }),
     },
     from: () => ({
@@ -213,12 +208,27 @@ function createDummyClient() {
         eq: () => ({
           single: () => Promise.resolve({ data: null, error: null }),
         }),
+        or: () => ({
+          neq: () => ({
+            limit: () => Promise.resolve({ data: [], error: null }),
+          }),
+        }),
+        order: () => ({
+          limit: () => Promise.resolve({ data: [], error: null }),
+        }),
       }),
       insert: () => Promise.resolve({ error: null }),
       update: () => ({
         eq: () => Promise.resolve({ error: null }),
       }),
+      delete: () => ({
+        eq: () => Promise.resolve({ error: null }),
+      }),
+      maybeSingle: () => Promise.resolve({ data: null, error: null }),
+      rpc: () => Promise.resolve({ data: null, error: null }),
     }),
+    rpc: () => Promise.resolve({ data: null, error: null }),
+    removeChannel: () => {},
   }
 }
 
@@ -234,6 +244,14 @@ export async function initSupabaseClient() {
   }
 
   if (!supabaseInstance) {
-    await createSupabaseClientAsync()
+    try {
+      await createSupabaseClientAsync()
+      return true
+    } catch (error) {
+      console.error("Error initializing Supabase client:", error)
+      throw error
+    }
   }
+
+  return true
 }
