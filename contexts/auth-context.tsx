@@ -145,6 +145,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // Set a timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      if (isLoading) {
+        console.log("Auth loading timeout reached, forcing state update")
+        setIsLoading(false)
+      }
+    }, 5000) // 5 second timeout
+
     loadUser()
 
     // Set up auth state change listener
@@ -181,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
 
     return () => {
+      clearTimeout(timeoutId)
       if (data && data.subscription) {
         data.subscription.unsubscribe()
       }
@@ -227,6 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           description: error.message || "Failed to login with GitHub",
           variant: "destructive",
         })
+        setIsLoading(false)
       }
     } catch (error) {
       console.error("GitHub login unexpected error:", error)
@@ -235,7 +245,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         description: "An unexpected error occurred",
         variant: "destructive",
       })
-    } finally {
       setIsLoading(false)
     }
   }
@@ -273,6 +282,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           description: error.message || "Failed to login with Google",
           variant: "destructive",
         })
+        setIsLoading(false)
       }
     } catch (error) {
       console.error("Google login unexpected error:", error)
@@ -281,7 +291,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         description: "An unexpected error occurred",
         variant: "destructive",
       })
-    } finally {
       setIsLoading(false)
     }
   }

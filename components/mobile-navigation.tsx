@@ -52,7 +52,7 @@ export function MobileNavigation() {
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 bg-background border-t">
+    <div className="fixed bottom-0 left-0 right-0 z-50 bg-background border-t">
       <div className="flex items-center justify-around h-16">
         <Link
           href="/"
@@ -83,7 +83,7 @@ export function MobileNavigation() {
               <span className="text-xs mt-1">Menu</span>
             </button>
           </SheetTrigger>
-          <SheetContent side="right" className="w-full sm:w-96 p-0">
+          <SheetContent side="right" className="w-full sm:w-96 p-0 z-50">
             <div className="p-4 border-b">
               <h2 className="text-lg font-semibold">All Tools</h2>
             </div>
