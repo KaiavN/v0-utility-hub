@@ -257,10 +257,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Store the current path to redirect back after login
       if (typeof window !== "undefined") {
         sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
+
+        // Clear any previous auth errors
+        sessionStorage.removeItem("authError")
       }
 
       const siteUrl = getSiteUrl()
       console.log("Logging in with Google, redirect URL:", `${siteUrl}/auth/callback`)
+
+      // Generate a random state parameter to prevent CSRF attacks
+      const stateParam = Math.random().toString(36).substring(2, 15)
+      sessionStorage.setItem("oauthState", stateParam)
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
@@ -271,6 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           queryParams: {
             access_type: "offline",
             prompt: "consent",
+            state: stateParam,
           },
         },
       })
