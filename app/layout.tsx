@@ -11,7 +11,6 @@ import { Toaster } from "@/components/ui/toaster"
 import { FeatureTutorialButton } from "@/components/feature-tutorial-button"
 import { EnvDebug } from "@/components/debug/env-debug"
 import { SupabaseInitializer } from "@/components/supabase-initializer"
-import { SupabaseEnvDebug } from "@/components/debug/supabase-env-debug"
 
 export const metadata: Metadata = {
   title: "Utility Hub",
@@ -73,7 +72,6 @@ export default function RootLayout({ children }: Props) {
         {/* Feature tutorial button */}
         <FeatureTutorialButton />
         {process.env.NODE_ENV === "development" && <EnvDebug />}
-        {process.env.NODE_ENV === "development" && <SupabaseEnvDebug />}
       </body>
     </html>
   )

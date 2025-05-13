@@ -4,8 +4,9 @@ export interface Message {
   created_at: string
   read: boolean
   sender_id: string
-  sender_name: string
+  sender_name: string | null
   sender_avatar: string | null
+  conversation_id: string
 }
 
 export interface Conversation {
@@ -18,25 +19,28 @@ export interface Conversation {
 export interface Profile {
   id: string
   display_name: string | null
-  username: string | null
   avatar_url: string | null
   email: string | null
 }
 
 export interface ConversationWithParticipants extends Conversation {
   participants: Profile[]
-  lastMessage?: string | null
-  lastMessageTimestamp?: string | null
-  unreadCount?: number
-  participantId?: string | null
-  participantName?: string | null
 }
 
 export interface ConversationSummary {
   id: string
-  title: string | null
+  participantId: string
+  participantName: string
   lastMessage: string | null
-  lastMessageTime: string | null
+  lastMessageTimestamp: string | null
   unreadCount: number
-  participants: Profile[]
+}
+
+// State for the messaging context
+export interface MessagingState {
+  conversations: ConversationSummary[]
+  activeConversation: string | null
+  messages: Record<string, Message[]>
+  isLoading: boolean
+  error: string | null
 }

@@ -20,9 +20,9 @@ interface AuthContextType {
   loginWithGitHub: () => Promise<void>
   loginWithGoogle: () => Promise<void>
   logout: () => Promise<void>
+  deleteAccount: () => Promise<boolean>
   profile: any | null
   updateProfile: (data: any) => Promise<boolean>
-  deleteAccount: () => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -284,37 +284,122 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Simplified logout function
+  // Improved logout function
   const logout = async () => {
     try {
       setIsLoading(true)
-      const { error } = await supabase.auth.signOut()
 
-      if (error) {
-        console.error("Logout error:", error)
-        toast({
-          title: "Logout Failed",
-          description: error.message || "Failed to logout",
-          variant: "destructive",
-        })
-        return
+      // Call the logout API endpoint
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Logout failed")
       }
 
+      // Clear local state
       setUser(null)
       setProfile(null)
       setIsAuthenticated(false)
+
       toast({
         title: "Logged Out",
         description: "You have been successfully logged out",
       })
+
+      // Redirect to home page
       router.push("/")
     } catch (error) {
       console.error("Logout error:", error)
       toast({
         title: "Logout Failed",
-        description: "An unexpected error occurred",
+        description: error instanceof Error ? error.message : "An unexpected error occurred",
         variant: "destructive",
       })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Delete account function
+  const deleteAccount = async (): Promise<boolean> => {
+    if (!user) {
+      toast({
+        title: "Error",
+        description: "You must be logged in to delete your account",
+        variant: "destructive",
+      })
+      return false
+    }
+
+    try {
+      setIsLoading(true)
+
+      // First, delete user data from the database
+      // 1. Delete messages
+      const { error: messagesError } = await supabase.from("messages").delete().eq("sender_id", user.id)
+
+      if (messagesError) {
+        console.error("Error deleting messages:", messagesError)
+        throw new Error(messagesError.message)
+      }
+
+      // 2. Delete conversation participants
+      const { error: participantsError } = await supabase
+        .from("conversation_participants")
+        .delete()
+        .eq("user_id", user.id)
+
+      if (participantsError) {
+        console.error("Error deleting conversation participants:", participantsError)
+        throw new Error(participantsError.message)
+      }
+
+      // 3. Delete profile
+      const { error: profileError } = await supabase.from("profiles").delete().eq("id", user.id)
+
+      if (profileError) {
+        console.error("Error deleting profile:", profileError)
+        throw new Error(profileError.message)
+      }
+
+      // Finally, delete the user account
+      const { error: deleteError } = await supabase.auth.admin.deleteUser(user.id)
+
+      if (deleteError) {
+        console.error("Error deleting user:", deleteError)
+        throw new Error(deleteError.message)
+      }
+
+      // Sign out
+      await supabase.auth.signOut()
+
+      // Clear local state
+      setUser(null)
+      setProfile(null)
+      setIsAuthenticated(false)
+
+      toast({
+        title: "Account Deleted",
+        description: "Your account has been successfully deleted",
+      })
+
+      // Redirect to home page
+      router.push("/")
+      return true
+    } catch (error) {
+      console.error("Delete account error:", error)
+      toast({
+        title: "Delete Account Failed",
+        description: error instanceof Error ? error.message : "An unexpected error occurred",
+        variant: "destructive",
+      })
+      return false
     } finally {
       setIsLoading(false)
     }
@@ -379,67 +464,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Delete account function
-  const deleteAccount = async (): Promise<boolean> => {
-    if (!user) return false
-
-    try {
-      setIsLoading(true)
-
-      // First delete user data (profiles, etc.)
-      const { error: profileDeleteError } = await supabase.from("profiles").delete().eq("id", user.id)
-
-      if (profileDeleteError) {
-        console.error("Error deleting profile:", profileDeleteError)
-        toast({
-          title: "Delete Account Failed",
-          description: "Failed to delete your account data. Please try again.",
-          variant: "destructive",
-        })
-        return false
-      }
-
-      // Then delete the user authentication record
-      const { error: authDeleteError } = await supabase.auth.admin.deleteUser(user.id)
-
-      if (authDeleteError) {
-        console.error("Error deleting auth user:", authDeleteError)
-        toast({
-          title: "Delete Account Failed",
-          description: "Failed to delete your account. Please try again.",
-          variant: "destructive",
-        })
-        return false
-      }
-
-      // Sign out the user
-      await supabase.auth.signOut()
-
-      // Clear local state
-      setUser(null)
-      setProfile(null)
-      setIsAuthenticated(false)
-
-      toast({
-        title: "Account Deleted",
-        description: "Your account has been successfully deleted.",
-      })
-
-      router.push("/")
-      return true
-    } catch (error) {
-      console.error("Delete account error:", error)
-      toast({
-        title: "Delete Account Failed",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive",
-      })
-      return false
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
   return (
     <AuthContext.Provider
       value={{
@@ -450,8 +474,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginWithGitHub,
         loginWithGoogle,
         logout,
-        updateProfile,
         deleteAccount,
+        updateProfile,
       }}
     >
       {children}

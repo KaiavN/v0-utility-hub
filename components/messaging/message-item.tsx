@@ -1,26 +1,26 @@
 "use client"
 
-import { formatDistanceToNow } from "date-fns"
+import { format } from "date-fns"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import type { Message } from "@/lib/messaging-types"
-import { CheckCheck } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 interface MessageItemProps {
   message: Message
-  isCurrentUser: boolean
+  isOwnMessage: boolean
 }
 
-export function MessageItem({ message, isCurrentUser }: MessageItemProps) {
-  const formatTimestamp = (timestamp: string) => {
+export function MessageItem({ message, isOwnMessage }: MessageItemProps) {
+  const formattedTime = (() => {
     try {
-      return formatDistanceToNow(new Date(timestamp), { addSuffix: true })
+      return format(new Date(message.created_at), "h:mm a")
     } catch (error) {
-      console.error("Invalid date format:", error)
+      console.error("Invalid date format:", message.created_at)
       return ""
     }
-  }
+  })()
 
-  const getInitials = (name: string | undefined) => {
+  const getInitials = (name: string | null) => {
     if (!name) return "??"
     return name
       .split(" ")
@@ -31,31 +31,23 @@ export function MessageItem({ message, isCurrentUser }: MessageItemProps) {
   }
 
   return (
-    <div className={`flex ${isCurrentUser ? "justify-end" : "justify-start"}`}>
-      <div className={`flex max-w-[80%] ${isCurrentUser ? "flex-row-reverse" : ""}`}>
-        {!isCurrentUser && (
-          <Avatar className="h-8 w-8 mr-2">
-            {message.sender_avatar && (
-              <AvatarImage src={message.sender_avatar || "/placeholder.svg"} alt={message.sender_name || ""} />
-            )}
-            <AvatarFallback>{getInitials(message.sender_name)}</AvatarFallback>
-          </Avatar>
-        )}
-        <div>
-          <div
-            className={`rounded-lg px-4 py-2 ${isCurrentUser ? "bg-primary text-primary-foreground ml-2" : "bg-muted"}`}
-          >
-            {message.content}
-          </div>
-          <div className={`flex items-center text-xs text-muted-foreground mt-1 ${isCurrentUser ? "justify-end" : ""}`}>
-            <span>{formatTimestamp(message.created_at)}</span>
-            {isCurrentUser && (
-              <span className="ml-1 flex items-center">
-                <CheckCheck className={`h-3 w-3 ${message.read ? "text-primary" : ""}`} />
-              </span>
-            )}
-          </div>
+    <div className={cn("flex items-start gap-2 max-w-[80%]", isOwnMessage ? "ml-auto flex-row-reverse" : "mr-auto")}>
+      {!isOwnMessage && (
+        <Avatar className="h-8 w-8">
+          <AvatarImage src={message.sender_avatar || ""} alt={message.sender_name || "User"} />
+          <AvatarFallback>{getInitials(message.sender_name)}</AvatarFallback>
+        </Avatar>
+      )}
+      <div className="flex flex-col gap-1">
+        <div
+          className={cn(
+            "rounded-lg px-3 py-2 text-sm",
+            isOwnMessage ? "bg-primary text-primary-foreground" : "bg-muted",
+          )}
+        >
+          {message.content}
         </div>
+        <span className="text-xs text-muted-foreground px-1">{formattedTime}</span>
       </div>
     </div>
   )

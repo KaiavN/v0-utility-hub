@@ -1,30 +1,23 @@
 "use client"
 
 import type React from "react"
-import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import { createContext, useContext, useEffect, useCallback, useReducer } from "react"
 import { createSupabaseClient } from "@/lib/supabase-client"
 import { useAuth } from "@/contexts/auth-context"
 import { toast } from "@/components/ui/use-toast"
-import type { Message, ConversationWithParticipants } from "@/lib/messaging-types"
+import type { Message, ConversationSummary, MessagingState } from "@/lib/messaging-types"
 
-interface MessagingState {
-  conversations: ConversationWithParticipants[]
-  activeConversation: string | null
-  messages: Record<string, Message[]>
-  isLoading: boolean
-  error: string | null
-}
+// Action types for the reducer
+type MessagingAction =
+  | { type: "SET_CONVERSATIONS"; payload: ConversationSummary[] }
+  | { type: "SET_ACTIVE_CONVERSATION"; payload: string | null }
+  | { type: "SET_MESSAGES"; payload: { conversationId: string; messages: Message[] } }
+  | { type: "ADD_MESSAGE"; payload: Message }
+  | { type: "SET_LOADING"; payload: boolean }
+  | { type: "SET_ERROR"; payload: string | null }
+  | { type: "RESET" }
 
-interface MessagingContextType {
-  state: MessagingState
-  sendMessage: (content: string, recipientId?: string) => Promise<boolean>
-  setActiveConversation: (conversationId: string | null) => void
-  createConversation: (participantId: string, initialMessage?: string) => Promise<string | null>
-  refreshConversations: () => Promise<void>
-  markMessagesAsRead: (conversationId: string) => Promise<void>
-  deleteConversation: (conversationId: string) => Promise<boolean>
-}
-
+// Initial state
 const initialState: MessagingState = {
   conversations: [],
   activeConversation: null,
@@ -33,136 +26,68 @@ const initialState: MessagingState = {
   error: null,
 }
 
+// Reducer function
+function messagingReducer(state: MessagingState, action: MessagingAction): MessagingState {
+  switch (action.type) {
+    case "SET_CONVERSATIONS":
+      return { ...state, conversations: action.payload }
+    case "SET_ACTIVE_CONVERSATION":
+      return { ...state, activeConversation: action.payload }
+    case "SET_MESSAGES":
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [action.payload.conversationId]: action.payload.messages,
+        },
+      }
+    case "ADD_MESSAGE":
+      const conversationId = action.payload.conversation_id
+      const existingMessages = state.messages[conversationId] || []
+      // Check if message already exists to prevent duplicates
+      if (existingMessages.some((msg) => msg.id === action.payload.id)) {
+        return state
+      }
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [conversationId]: [...existingMessages, action.payload],
+        },
+      }
+    case "SET_LOADING":
+      return { ...state, isLoading: action.payload }
+    case "SET_ERROR":
+      return { ...state, error: action.payload }
+    case "RESET":
+      return initialState
+    default:
+      return state
+  }
+}
+
+interface MessagingContextType {
+  state: MessagingState
+  sendMessage: (content: string, conversationId?: string) => Promise<boolean>
+  setActiveConversation: (conversationId: string | null) => void
+  createConversation: (participantId: string, initialMessage?: string) => Promise<string | null>
+  refreshConversations: () => Promise<void>
+  markMessagesAsRead: (conversationId: string) => Promise<void>
+  deleteConversation: (conversationId: string) => Promise<boolean>
+  clearError: () => void
+}
+
 const MessagingContext = createContext<MessagingContextType | undefined>(undefined)
 
 export function MessagingProvider({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated } = useAuth()
-  const [state, setState] = useState<MessagingState>(initialState)
+  const [state, dispatch] = useReducer(messagingReducer, initialState)
   const supabase = createSupabaseClient()
 
-  // Helper function to update state
-  const updateState = (newState: Partial<MessagingState>) => {
-    setState((prev) => ({ ...prev, ...newState }))
-  }
-
-  // Create a new conversation
-  const createConversation = useCallback(
-    async (participantId: string, initialMessage?: string): Promise<string | null> => {
-      if (!isAuthenticated || !user?.id) {
-        toast({
-          title: "Error",
-          description: "You must be logged in to create conversations",
-          variant: "destructive",
-        })
-        return null
-      }
-
-      if (!participantId) {
-        toast({
-          title: "Error",
-          description: "Recipient is required",
-          variant: "destructive",
-        })
-        return null
-      }
-
-      try {
-        updateState({ isLoading: true, error: null })
-
-        // Check if conversation already exists
-        const { data: existingConversations } = await supabase
-          .from("conversation_participants")
-          .select("conversation_id")
-          .eq("user_id", user.id)
-
-        if (existingConversations && existingConversations.length > 0) {
-          const conversationIds = existingConversations.map((c) => c.conversation_id)
-
-          const { data: participantConversations } = await supabase
-            .from("conversation_participants")
-            .select("conversation_id")
-            .eq("user_id", participantId)
-            .in("conversation_id", conversationIds)
-
-          if (participantConversations && participantConversations.length > 0) {
-            // Conversation already exists
-            const existingConversationId = participantConversations[0].conversation_id
-            updateState({ isLoading: false })
-            setActiveConversation(existingConversationId)
-
-            // Send initial message if provided
-            if (initialMessage) {
-              await sendMessage(initialMessage)
-            }
-
-            return existingConversationId
-          }
-        }
-
-        // Create new conversation
-        const { data: conversationData, error: conversationError } = await supabase
-          .from("conversations")
-          .insert({})
-          .select()
-          .single()
-
-        if (conversationError) {
-          console.error("Error creating conversation:", conversationError)
-          toast({
-            title: "Error",
-            description: "Failed to create conversation",
-            variant: "destructive",
-          })
-          updateState({ isLoading: false })
-          return null
-        }
-
-        // Add participants
-        const { error: participantsError } = await supabase.from("conversation_participants").insert([
-          { conversation_id: conversationData.id, user_id: user.id },
-          { conversation_id: conversationData.id, user_id: participantId },
-        ])
-
-        if (participantsError) {
-          console.error("Error adding participants:", participantsError)
-          toast({
-            title: "Error",
-            description: "Failed to add participants to conversation",
-            variant: "destructive",
-          })
-          updateState({ isLoading: false })
-          return null
-        }
-
-        // Send initial message if provided
-        if (initialMessage) {
-          await supabase.from("messages").insert({
-            conversation_id: conversationData.id,
-            sender_id: user.id,
-            content: initialMessage.trim(),
-            read: false,
-          })
-        }
-
-        // Refresh conversations and set active conversation
-        await refreshConversations()
-        setActiveConversation(conversationData.id)
-
-        updateState({ isLoading: false })
-        return conversationData.id
-      } catch (err) {
-        console.error("Unexpected error creating conversation:", err)
-        toast({
-          title: "Error",
-          description: "An unexpected error occurred",
-          variant: "destructive",
-        })
-        updateState({ isLoading: false })
-        return null
-      }
-    },
-    [isAuthenticated, user, supabase, refreshConversations, setActiveConversation, sendMessage],
-  )
+  // Clear error
+  const clearError = useCallback(() => {
+    dispatch({ type: "SET_ERROR", payload: null })
+  }, [])
 
   // Fetch conversations
   const fetchConversations = useCallback(async () => {
@@ -171,96 +96,36 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      updateState({ isLoading: true, error: null })
+      dispatch({ type: "SET_LOADING", payload: true })
+      clearError()
 
-      const { data, error } = await supabase
-        .from("conversations")
-        .select(`
-          id,
-          created_at,
-          updated_at,
-          conversation_participants!inner (
-            user_id,
-            profiles:user_id (
-              id,
-              display_name,
-              username,
-              avatar_url,
-              email
-            )
-          )
-        `)
-        .or(`conversation_participants.user_id.eq.${user.id}`)
-        .order("updated_at", { ascending: false })
+      const response = await fetch(`/api/messages/conversations?userId=${user.id}`)
 
-      if (error) {
-        console.error("Error fetching conversations:", error)
-        updateState({ error: "Failed to load conversations", isLoading: false })
-        return
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to fetch conversations")
       }
 
-      if (!data || data.length === 0) {
-        updateState({ conversations: [], isLoading: false })
-        return
+      const data = await response.json()
+
+      if (Array.isArray(data.conversations)) {
+        dispatch({ type: "SET_CONVERSATIONS", payload: data.conversations })
+      } else {
+        console.error("Invalid conversations data:", data)
+        dispatch({ type: "SET_CONVERSATIONS", payload: [] })
       }
-
-      // Process conversations to get the last message and unread count
-      const processedConversations: ConversationWithParticipants[] = await Promise.all(
-        data.map(async (conv) => {
-          // Get participants excluding current user
-          const participants = conv.conversation_participants
-            .filter((p) => p.user_id !== user.id)
-            .map((p) => p.profiles)
-            .filter(Boolean)
-
-          // Get the last message
-          const { data: lastMessageData } = await supabase
-            .from("messages")
-            .select("*")
-            .eq("conversation_id", conv.id)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .single()
-
-          // Get unread count
-          const { count } = await supabase
-            .from("messages")
-            .select("*", { count: "exact", head: true })
-            .eq("conversation_id", conv.id)
-            .eq("read", false)
-            .neq("sender_id", user.id)
-
-          return {
-            id: conv.id,
-            title:
-              participants.length > 0
-                ? participants.map((p) => p.display_name || p.username || p.email).join(", ")
-                : "No participants",
-            created_at: conv.created_at,
-            updated_at: conv.updated_at,
-            participants: participants,
-            lastMessage: lastMessageData?.content || null,
-            lastMessageTimestamp: lastMessageData?.created_at || null,
-            unreadCount: count || 0,
-            participantId: participants[0]?.id || null,
-            participantName:
-              participants[0]?.display_name || participants[0]?.username || participants[0]?.email || "Unknown User",
-          }
-        }),
-      )
-
-      updateState({
-        conversations: processedConversations,
-        isLoading: false,
-      })
     } catch (err) {
-      console.error("Unexpected error fetching conversations:", err)
-      updateState({
-        error: "An unexpected error occurred",
-        isLoading: false,
+      console.error("Error fetching conversations:", err)
+      dispatch({ type: "SET_ERROR", payload: err instanceof Error ? err.message : "Failed to load conversations" })
+      toast({
+        title: "Error",
+        description: "Failed to load conversations. Please try again later.",
+        variant: "destructive",
       })
+    } finally {
+      dispatch({ type: "SET_LOADING", payload: false })
     }
-  }, [isAuthenticated, user, supabase])
+  }, [isAuthenticated, user, clearError])
 
   // Refresh conversations
   const refreshConversations = useCallback(async () => {
@@ -275,68 +140,70 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        updateState({ isLoading: true, error: null })
+        dispatch({ type: "SET_LOADING", payload: true })
+        clearError()
 
         const { data, error } = await supabase
           .from("messages")
-          .select(`
+          .select(
+            `
             id,
             content,
             created_at,
             read,
             sender_id,
-            sender:profiles!sender_id (
+            conversation_id,
+            sender:sender_id (
               display_name,
-              username,
               avatar_url
             )
-          `)
+          `,
+          )
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: true })
 
         if (error) {
           console.error("Error fetching messages:", error)
-          updateState({ error: "Failed to load messages", isLoading: false })
+          dispatch({ type: "SET_ERROR", payload: error.message })
           return
         }
 
         // Format messages
-        const formattedMessages: Message[] = (data || []).map((message) => ({
+        const formattedMessages: Message[] = (data || []).map((message: any) => ({
           id: message.id,
           content: message.content,
           created_at: message.created_at,
           read: message.read,
           sender_id: message.sender_id,
-          sender_name: message.sender?.display_name || message.sender?.username || "Unknown",
+          conversation_id: message.conversation_id,
+          sender_name: message.sender?.display_name || "Unknown",
           sender_avatar: message.sender?.avatar_url || null,
         }))
 
-        setState((prev) => ({
-          ...prev,
-          messages: {
-            ...prev.messages,
-            [conversationId]: formattedMessages,
-          },
-          isLoading: false,
-        }))
-
-        // Mark messages as read
-        await markMessagesAsRead(conversationId)
+        dispatch({
+          type: "SET_MESSAGES",
+          payload: { conversationId, messages: formattedMessages },
+        })
       } catch (err) {
         console.error("Unexpected error fetching messages:", err)
-        updateState({ error: "An unexpected error occurred", isLoading: false })
+        dispatch({
+          type: "SET_ERROR",
+          payload: err instanceof Error ? err.message : "Failed to load messages",
+        })
+      } finally {
+        dispatch({ type: "SET_LOADING", payload: false })
       }
     },
-    [isAuthenticated, user, supabase],
+    [isAuthenticated, user, supabase, clearError],
   )
 
   // Set active conversation
   const setActiveConversation = useCallback(
     (conversationId: string | null) => {
-      updateState({ activeConversation: conversationId })
-
+      dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: conversationId })
       if (conversationId) {
         fetchMessages(conversationId)
+        markMessagesAsRead(conversationId)
       }
     },
     [fetchMessages],
@@ -344,97 +211,186 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
 
   // Send a message
   const sendMessage = useCallback(
-    async (content: string, recipientId?: string): Promise<boolean> => {
-      if (!isAuthenticated || !user?.id) {
-        toast({
-          title: "Error",
-          description: "You must be logged in to send messages",
-          variant: "destructive",
-        })
-        return false
-      }
+    async (content: string, conversationId?: string): Promise<boolean> => {
+      const targetConversationId = conversationId || state.activeConversation
 
-      if (!content.trim()) {
+      if (!isAuthenticated || !user?.id || !targetConversationId || !content.trim()) {
         toast({
           title: "Error",
-          description: "Message cannot be empty",
+          description: "Cannot send message. Please check your connection and try again.",
           variant: "destructive",
         })
         return false
       }
 
       try {
-        updateState({ isLoading: true, error: null })
+        dispatch({ type: "SET_LOADING", payload: true })
+        clearError()
 
-        let conversationId = state.activeConversation
-
-        // If no active conversation but recipient ID is provided, create or find conversation
-        if (!conversationId && recipientId) {
-          conversationId = await createConversation(recipientId)
-          if (!conversationId) {
-            updateState({ isLoading: false })
-            return false
-          }
-        }
-
-        if (!conversationId) {
-          toast({
-            title: "Error",
-            description: "No active conversation",
-            variant: "destructive",
+        const { data, error } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: targetConversationId,
+            sender_id: user.id,
+            content: content.trim(),
           })
-          updateState({ isLoading: false })
-          return false
-        }
-
-        // Send the message
-        const { error } = await supabase.from("messages").insert({
-          conversation_id: conversationId,
-          sender_id: user.id,
-          content: content.trim(),
-          read: false,
-        })
+          .select()
+          .single()
 
         if (error) {
           console.error("Error sending message:", error)
+          dispatch({ type: "SET_ERROR", payload: error.message })
           toast({
             title: "Error",
-            description: "Failed to send message",
+            description: "Failed to send message. Please try again.",
             variant: "destructive",
           })
-          updateState({ isLoading: false })
           return false
         }
 
-        // Update conversation's updated_at timestamp
-        await supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversationId)
+        // Optimistically add the message to the UI
+        if (data) {
+          const newMessage: Message = {
+            id: data.id,
+            content: data.content,
+            created_at: data.created_at,
+            read: data.read,
+            sender_id: data.sender_id,
+            conversation_id: data.conversation_id,
+            sender_name: user.name || user.email || "You",
+            sender_avatar: user.avatarUrl || null,
+          }
 
-        // Refresh messages and conversations
-        await fetchMessages(conversationId)
-        await refreshConversations()
+          dispatch({ type: "ADD_MESSAGE", payload: newMessage })
+        }
 
-        updateState({ isLoading: false })
+        // Refresh conversations to update last message
+        refreshConversations()
         return true
       } catch (err) {
         console.error("Unexpected error sending message:", err)
+        dispatch({
+          type: "SET_ERROR",
+          payload: err instanceof Error ? err.message : "Failed to send message",
+        })
         toast({
           title: "Error",
-          description: "An unexpected error occurred",
+          description: "An unexpected error occurred. Please try again.",
           variant: "destructive",
         })
-        updateState({ isLoading: false })
         return false
+      } finally {
+        dispatch({ type: "SET_LOADING", payload: false })
       }
     },
-    [
-      isAuthenticated,
-      user,
-      state.activeConversation,
-      supabase,
-      createConversation,
-      fetchMessages,
-      refreshConversations,
-    ],
+    [isAuthenticated, user, state.activeConversation, supabase, refreshConversations, clearError],
+  )
+
+  // Create a new conversation
+  const createConversation = useCallback(
+    async (participantId: string, initialMessage?: string): Promise<string | null> => {
+      if (!isAuthenticated || !user?.id || !participantId) {
+        toast({
+          title: "Error",
+          description: "You must be logged in to create conversations",
+          variant: "destructive",
+        })
+        return null
+      }
+
+      // Don't create conversation with yourself
+      if (participantId === user.id) {
+        toast({
+          title: "Error",
+          description: "You cannot create a conversation with yourself",
+          variant: "destructive",
+        })
+        return null
+      }
+
+      try {
+        dispatch({ type: "SET_LOADING", payload: true })
+        clearError()
+
+        // Check if conversation already exists
+        const { data: existingConversations, error: checkError } = await supabase
+          .from("conversation_participants")
+          .select("conversation_id")
+          .eq("user_id", user.id)
+          .in(
+            "conversation_id",
+            supabase.from("conversation_participants").select("conversation_id").eq("user_id", participantId),
+          )
+
+        if (checkError) {
+          console.error("Error checking existing conversations:", checkError)
+          throw new Error(checkError.message)
+        }
+
+        // If conversation exists, return it
+        if (existingConversations && existingConversations.length > 0) {
+          const existingConversationId = existingConversations[0].conversation_id
+
+          // If there's an initial message, send it
+          if (initialMessage) {
+            await sendMessage(initialMessage, existingConversationId)
+          }
+
+          return existingConversationId
+        }
+
+        // Create the conversation
+        const { data: conversationData, error: conversationError } = await supabase
+          .from("conversations")
+          .insert({})
+          .select()
+          .single()
+
+        if (conversationError) {
+          console.error("Error creating conversation:", conversationError)
+          throw new Error(conversationError.message)
+        }
+
+        // Add participants
+        const participantsToInsert = [
+          { conversation_id: conversationData.id, user_id: user.id },
+          { conversation_id: conversationData.id, user_id: participantId },
+        ]
+
+        const { error: participantsError } = await supabase
+          .from("conversation_participants")
+          .insert(participantsToInsert)
+
+        if (participantsError) {
+          console.error("Error adding participants:", participantsError)
+          throw new Error(participantsError.message)
+        }
+
+        // If there's an initial message, send it
+        if (initialMessage) {
+          await sendMessage(initialMessage, conversationData.id)
+        }
+
+        // Refresh conversations
+        await refreshConversations()
+        return conversationData.id
+      } catch (err) {
+        console.error("Error creating conversation:", err)
+        dispatch({
+          type: "SET_ERROR",
+          payload: err instanceof Error ? err.message : "Failed to create conversation",
+        })
+        toast({
+          title: "Error",
+          description: "Failed to create conversation. Please try again.",
+          variant: "destructive",
+        })
+        return null
+      } finally {
+        dispatch({ type: "SET_LOADING", payload: false })
+      }
+    },
+    [isAuthenticated, user, supabase, sendMessage, refreshConversations, clearError],
   )
 
   // Mark messages as read
@@ -456,29 +412,24 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           console.error("Error marking messages as read:", error)
         } else {
           // Update local state to reflect read status
-          setState((prev) => {
-            const conversationMessages = prev.messages[conversationId] || []
-            const updatedMessages = conversationMessages.map((msg) =>
-              msg.sender_id !== user.id ? { ...msg, read: true } : msg,
-            )
+          const currentMessages = state.messages[conversationId] || []
+          const updatedMessages = currentMessages.map((msg) =>
+            msg.sender_id !== user.id ? { ...msg, read: true } : msg,
+          )
 
-            return {
-              ...prev,
-              messages: {
-                ...prev.messages,
-                [conversationId]: updatedMessages,
-              },
-              conversations: prev.conversations.map((conv) =>
-                conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv,
-              ),
-            }
+          dispatch({
+            type: "SET_MESSAGES",
+            payload: { conversationId, messages: updatedMessages },
           })
+
+          // Refresh conversations to update unread counts
+          refreshConversations()
         }
       } catch (err) {
         console.error("Unexpected error marking messages as read:", err)
       }
     },
-    [isAuthenticated, user, supabase],
+    [isAuthenticated, user, supabase, state.messages, refreshConversations],
   )
 
   // Delete a conversation
@@ -494,23 +445,18 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        updateState({ isLoading: true, error: null })
+        dispatch({ type: "SET_LOADING", payload: true })
+        clearError()
 
-        // Delete messages first (cascade doesn't always work reliably)
+        // First delete all messages in the conversation
         const { error: messagesError } = await supabase.from("messages").delete().eq("conversation_id", conversationId)
 
         if (messagesError) {
           console.error("Error deleting messages:", messagesError)
-          toast({
-            title: "Error",
-            description: "Failed to delete conversation messages",
-            variant: "destructive",
-          })
-          updateState({ isLoading: false })
-          return false
+          throw new Error(messagesError.message)
         }
 
-        // Delete participants
+        // Then delete the participants
         const { error: participantsError } = await supabase
           .from("conversation_participants")
           .delete()
@@ -518,37 +464,27 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
 
         if (participantsError) {
           console.error("Error deleting participants:", participantsError)
-          toast({
-            title: "Error",
-            description: "Failed to delete conversation participants",
-            variant: "destructive",
-          })
-          updateState({ isLoading: false })
-          return false
+          throw new Error(participantsError.message)
         }
 
-        // Delete the conversation
+        // Finally delete the conversation
         const { error: conversationError } = await supabase.from("conversations").delete().eq("id", conversationId)
 
         if (conversationError) {
           console.error("Error deleting conversation:", conversationError)
-          toast({
-            title: "Error",
-            description: "Failed to delete conversation",
-            variant: "destructive",
-          })
-          updateState({ isLoading: false })
-          return false
+          throw new Error(conversationError.message)
         }
 
-        // Update local state
-        setState((prev) => ({
-          ...prev,
-          conversations: prev.conversations.filter((c) => c.id !== conversationId),
-          activeConversation: prev.activeConversation === conversationId ? null : prev.activeConversation,
-          messages: Object.fromEntries(Object.entries(prev.messages).filter(([key]) => key !== conversationId)),
-          isLoading: false,
-        }))
+        // If this was the active conversation, clear it
+        if (state.activeConversation === conversationId) {
+          dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: null })
+        }
+
+        // Remove the conversation from local state
+        dispatch({
+          type: "SET_CONVERSATIONS",
+          payload: state.conversations.filter((c) => c.id !== conversationId),
+        })
 
         toast({
           title: "Success",
@@ -557,18 +493,30 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
 
         return true
       } catch (err) {
-        console.error("Unexpected error deleting conversation:", err)
+        console.error("Error deleting conversation:", err)
+        dispatch({
+          type: "SET_ERROR",
+          payload: err instanceof Error ? err.message : "Failed to delete conversation",
+        })
         toast({
           title: "Error",
-          description: "An unexpected error occurred",
+          description: "Failed to delete conversation. Please try again.",
           variant: "destructive",
         })
-        updateState({ isLoading: false })
         return false
+      } finally {
+        dispatch({ type: "SET_LOADING", payload: false })
       }
     },
-    [isAuthenticated, user, supabase],
+    [isAuthenticated, user, supabase, state.activeConversation, state.conversations, clearError],
   )
+
+  // Reset state when user logs out
+  useEffect(() => {
+    if (!isAuthenticated) {
+      dispatch({ type: "RESET" })
+    }
+  }, [isAuthenticated])
 
   // Set up real-time subscription for messages
   useEffect(() => {
@@ -586,12 +534,10 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         async (payload) => {
           const newMessage = payload.new as any
 
-          if (!newMessage) return
-
-          // Fetch sender info
+          // Fetch the sender info
           const { data: sender } = await supabase
             .from("profiles")
-            .select("display_name, username, avatar_url")
+            .select("display_name, avatar_url")
             .eq("id", newMessage.sender_id)
             .single()
 
@@ -599,29 +545,22 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
             id: newMessage.id,
             content: newMessage.content,
             created_at: newMessage.created_at,
-            read: newMessage.read || newMessage.sender_id === user.id,
+            read: newMessage.read,
             sender_id: newMessage.sender_id,
-            sender_name: sender?.display_name || sender?.username || "Unknown",
+            conversation_id: newMessage.conversation_id,
+            sender_name: sender?.display_name || "Unknown",
             sender_avatar: sender?.avatar_url || null,
           }
 
-          // Update messages if it's for the active conversation
-          if (state.activeConversation === newMessage.conversation_id) {
-            setState((prev) => ({
-              ...prev,
-              messages: {
-                ...prev.messages,
-                [newMessage.conversation_id]: [...(prev.messages[newMessage.conversation_id] || []), formattedMessage],
-              },
-            }))
+          // Add message to state if it's for the current conversation
+          dispatch({ type: "ADD_MESSAGE", payload: formattedMessage })
 
-            // Mark as read if it's not from the current user
-            if (newMessage.sender_id !== user.id) {
-              markMessagesAsRead(newMessage.conversation_id)
-            }
+          // Mark as read if it's the active conversation and not from the current user
+          if (state.activeConversation === newMessage.conversation_id && newMessage.sender_id !== user.id) {
+            markMessagesAsRead(newMessage.conversation_id)
           }
 
-          // Refresh conversations to update the list with latest message
+          // Refresh conversations to update the list
           refreshConversations()
         },
       )
@@ -630,15 +569,12 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     return () => {
       supabase.removeChannel(subscription)
     }
-  }, [isAuthenticated, user, state.activeConversation, supabase, markMessagesAsRead, refreshConversations])
+  }, [isAuthenticated, user, supabase, state.activeConversation, markMessagesAsRead, refreshConversations])
 
   // Load conversations on initial mount
   useEffect(() => {
     if (isAuthenticated && user?.id) {
       fetchConversations()
-    } else {
-      // Reset state when not authenticated
-      setState(initialState)
     }
   }, [isAuthenticated, user, fetchConversations])
 
@@ -652,6 +588,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         refreshConversations,
         markMessagesAsRead,
         deleteConversation,
+        clearError,
       }}
     >
       {children}

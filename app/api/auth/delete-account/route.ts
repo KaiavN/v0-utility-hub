@@ -2,11 +2,8 @@ import { NextResponse } from "next/server"
 import { createSupabaseClient, createSupabaseAdmin } from "@/lib/supabase-client"
 
 export async function POST() {
-  console.log("API: /auth/delete-account called")
-
   try {
     const supabase = createSupabaseClient()
-    const supabaseAdmin = createSupabaseAdmin()
 
     // Get current session
     const {
@@ -27,47 +24,53 @@ export async function POST() {
     const userId = session.user.id
     console.log(`API: /auth/delete-account - Deleting account for user: ${userId}`)
 
-    // Delete user data (profiles, messages, etc.)
-    // First, delete messages
-    const { error: messagesError } = await supabaseAdmin.from("messages").delete().eq("sender_id", userId)
+    // Use admin client to delete user data
+    const adminClient = createSupabaseAdmin()
+
+    // 1. Delete messages
+    const { error: messagesError } = await adminClient.from("messages").delete().eq("sender_id", userId)
 
     if (messagesError) {
       console.error("API: /auth/delete-account - Error deleting messages:", messagesError)
-      // Continue with deletion even if messages deletion fails
+      return NextResponse.json({ error: messagesError.message }, { status: 500 })
     }
 
-    // Delete conversation participants
-    const { error: participantsError } = await supabaseAdmin
+    // 2. Delete conversation participants
+    const { error: participantsError } = await adminClient
       .from("conversation_participants")
       .delete()
       .eq("user_id", userId)
 
     if (participantsError) {
       console.error("API: /auth/delete-account - Error deleting conversation participants:", participantsError)
-      // Continue with deletion even if participants deletion fails
+      return NextResponse.json({ error: participantsError.message }, { status: 500 })
     }
 
-    // Delete profile
-    const { error: profileError } = await supabaseAdmin.from("profiles").delete().eq("id", userId)
+    // 3. Delete profile
+    const { error: profileError } = await adminClient.from("profiles").delete().eq("id", userId)
 
     if (profileError) {
       console.error("API: /auth/delete-account - Error deleting profile:", profileError)
       return NextResponse.json({ error: profileError.message }, { status: 500 })
     }
 
-    // Delete user auth record
-    const { error: userError } = await supabaseAdmin.auth.admin.deleteUser(userId)
+    // 4. Delete user
+    const { error: userError } = await adminClient.auth.admin.deleteUser(userId)
 
     if (userError) {
       console.error("API: /auth/delete-account - Error deleting user:", userError)
       return NextResponse.json({ error: userError.message }, { status: 500 })
     }
 
-    // Sign out the user
+    // 5. Sign out
     await supabase.auth.signOut()
 
     console.log(`API: /auth/delete-account - Successfully deleted account for ${userId}`)
-    return NextResponse.json({ success: true, message: "Account successfully deleted" })
+
+    return NextResponse.json({
+      success: true,
+      message: "Account deleted successfully",
+    })
   } catch (error) {
     console.error("API: /auth/delete-account - Unexpected error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })

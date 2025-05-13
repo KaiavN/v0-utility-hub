@@ -36,7 +36,10 @@ export function DirectSignup() {
 
     try {
       // Create a fresh Supabase client
-      const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+      const supabase = createClient(
+        process.env.STORAGE_NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.STORAGE_NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      )
 
       // Basic signup with no extra options
       const { error } = await supabase.auth.signUp({

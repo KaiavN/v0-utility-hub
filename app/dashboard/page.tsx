@@ -55,7 +55,10 @@ export default function DashboardPage() {
       setError(null)
 
       try {
-        const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+        const supabase = createClient(
+          process.env.STORAGE_NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.STORAGE_NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        )
 
         // Fetch user achievements (this is a mock query since we don't know the exact schema)
         const { data: achievementsData, error: achievementsError } = await supabase

@@ -1,7 +1,5 @@
 "use client"
 
-import type React from "react"
-
 import { useEffect, useRef, useState } from "react"
 import { useMessaging } from "@/contexts/messaging-context"
 import { useAuth } from "@/contexts/auth-context"
@@ -9,34 +7,50 @@ import { MessageItem } from "./message-item"
 import { MessageComposer } from "./message-composer"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Loader2, MessageSquare } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { AlertCircle, ArrowLeft, MoreVertical } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 export function ConversationView() {
-  const { state } = useMessaging()
+  const { state, setActiveConversation, deleteConversation } = useMessaging()
   const { user } = useAuth()
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const [autoScroll, setAutoScroll] = useState(true)
+  const [showBackButton, setShowBackButton] = useState(false)
 
-  const { activeConversation, messages, isLoading } = state
-  const conversation = state.conversations.find((c) => c.id === activeConversation)
-  const conversationMessages = activeConversation && messages[activeConversation] ? messages[activeConversation] : []
+  const { activeConversation } = state
+  const conversation = activeConversation ? state.conversations.find((c) => c.id === activeConversation) : null
+  const conversationMessages =
+    activeConversation && state.messages[activeConversation] ? state.messages[activeConversation] : []
+
+  // Handle responsive back button
+  useEffect(() => {
+    const handleResize = () => {
+      setShowBackButton(window.innerWidth < 768)
+    }
+
+    handleResize()
+    window.addEventListener("resize", handleResize)
+    return () => window.removeEventListener("resize", handleResize)
+  }, [])
 
   // Scroll to bottom when messages change
   useEffect(() => {
-    if (messagesEndRef.current && autoScroll) {
+    if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
     }
-  }, [conversationMessages, autoScroll])
+  }, [conversationMessages])
 
-  // Handle scroll events to determine if auto-scroll should be enabled
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
-    // If user is scrolled near the bottom, enable auto-scroll
-    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100
-    setAutoScroll(isNearBottom)
+  const handleDeleteConversation = async () => {
+    if (!activeConversation) return
+
+    const success = await deleteConversation(activeConversation)
+    if (success) {
+      setActiveConversation(null)
+    }
   }
 
-  const getInitials = (name: string | undefined) => {
+  const getInitials = (name: string) => {
     if (!name) return "??"
     return name
       .split(" ")
@@ -46,20 +60,10 @@ export function ConversationView() {
       .substring(0, 2)
   }
 
-  if (isLoading) {
-    return (
-      <div className="flex flex-col h-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-        <p className="text-muted-foreground">Loading conversation...</p>
-      </div>
-    )
-  }
-
   if (!activeConversation || !conversation) {
     return (
       <div className="flex-1 flex items-center justify-center p-8 text-center text-muted-foreground">
         <div>
-          <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
           <h3 className="text-lg font-medium mb-2">Select a conversation</h3>
           <p>Choose a conversation from the list or start a new one</p>
         </div>
@@ -67,40 +71,67 @@ export function ConversationView() {
     )
   }
 
+  if (state.error) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <Alert variant="destructive" className="max-w-md">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{state.error}</AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center p-4 border-b">
-        <Avatar className="h-10 w-10 mr-3">
-          {conversation.participants?.[0]?.avatar_url && (
-            <AvatarImage
-              src={conversation.participants[0].avatar_url || "/placeholder.svg"}
-              alt={conversation.participantName || ""}
-            />
+      <div className="flex items-center justify-between p-4 border-b">
+        <div className="flex items-center">
+          {showBackButton && (
+            <Button variant="ghost" size="icon" className="mr-2 md:hidden" onClick={() => setActiveConversation(null)}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
           )}
-          <AvatarFallback>{getInitials(conversation.participantName)}</AvatarFallback>
-        </Avatar>
-        <div>
-          <h3 className="font-medium">{conversation.participantName || "Unknown"}</h3>
-          {conversation.participants?.[0]?.email && (
-            <p className="text-sm text-muted-foreground">{conversation.participants[0].email}</p>
-          )}
+          <Avatar className="h-10 w-10 mr-3">
+            <AvatarImage src={`/api/avatar/${conversation.participantId}`} alt={conversation.participantName} />
+            <AvatarFallback>{getInitials(conversation.participantName || "")}</AvatarFallback>
+          </Avatar>
+          <div>
+            <h3 className="font-medium">{conversation.participantName || "Unknown"}</h3>
+          </div>
         </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon">
+              <MoreVertical className="h-5 w-5" />
+              <span className="sr-only">More options</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={handleDeleteConversation}>
+              Delete Conversation
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      <ScrollArea className="flex-1 p-4" onScroll={handleScroll}>
+      <ScrollArea className="flex-1 p-4">
         <div className="space-y-4">
-          {conversationMessages.length === 0 ? (
+          {state.isLoading && conversationMessages.length === 0 ? (
+            <div className="text-center text-muted-foreground py-8">Loading messages...</div>
+          ) : conversationMessages.length === 0 ? (
             <div className="text-center text-muted-foreground py-8">No messages yet. Start the conversation!</div>
           ) : (
             conversationMessages.map((message) => (
-              <MessageItem key={message.id} message={message} isCurrentUser={message.sender_id === user?.id} />
+              <MessageItem key={message.id} message={message} isOwnMessage={message.sender_id === user?.id} />
             ))
           )}
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
 
-      <MessageComposer recipientId={conversation.participantId} />
+      <MessageComposer conversationId={activeConversation} />
     </div>
   )
 }
