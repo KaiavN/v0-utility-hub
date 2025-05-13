@@ -2,6 +2,7 @@
 
 import { format } from "date-fns"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Check, CheckCheck } from "lucide-react"
 import type { Message } from "@/lib/messaging-types"
 import { cn } from "@/lib/utils"
 
@@ -47,7 +48,14 @@ export function MessageItem({ message, isOwnMessage }: MessageItemProps) {
         >
           {message.content}
         </div>
-        <span className="text-xs text-muted-foreground px-1">{formattedTime}</span>
+        <div className="flex items-center gap-1 px-1">
+          <span className="text-xs text-muted-foreground">{formattedTime}</span>
+          {isOwnMessage && (
+            <span className="text-xs text-muted-foreground">
+              {message.read ? <CheckCheck className="h-3 w-3 text-primary" /> : <Check className="h-3 w-3" />}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )

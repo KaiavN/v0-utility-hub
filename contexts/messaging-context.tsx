@@ -15,6 +15,7 @@ type MessagingAction =
   | { type: "ADD_MESSAGE"; payload: Message }
   | { type: "SET_LOADING"; payload: boolean }
   | { type: "SET_ERROR"; payload: string | null }
+  | { type: "SET_TYPING"; payload: { conversationId: string; isTyping: boolean } }
   | { type: "RESET" }
 
 // Initial state
@@ -24,6 +25,7 @@ const initialState: MessagingState = {
   messages: {},
   isLoading: false,
   error: null,
+  typingUsers: {},
 }
 
 // Reducer function
@@ -54,11 +56,24 @@ function messagingReducer(state: MessagingState, action: MessagingAction): Messa
           ...state.messages,
           [conversationId]: [...existingMessages, action.payload],
         },
+        // Clear typing indicator when a message is received
+        typingUsers: {
+          ...state.typingUsers,
+          [conversationId]: false,
+        },
       }
     case "SET_LOADING":
       return { ...state, isLoading: action.payload }
     case "SET_ERROR":
       return { ...state, error: action.payload }
+    case "SET_TYPING":
+      return {
+        ...state,
+        typingUsers: {
+          ...state.typingUsers,
+          [action.payload.conversationId]: action.payload.isTyping,
+        },
+      }
     case "RESET":
       return initialState
     default:
@@ -74,6 +89,7 @@ interface MessagingContextType {
   refreshConversations: () => Promise<void>
   markMessagesAsRead: (conversationId: string) => Promise<void>
   deleteConversation: (conversationId: string) => Promise<boolean>
+  setTypingStatus: (conversationId: string, isTyping: boolean) => Promise<void>
   clearError: () => void
 }
 
@@ -226,6 +242,9 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       try {
         dispatch({ type: "SET_LOADING", payload: true })
         clearError()
+
+        // Clear typing indicator
+        await setTypingStatus(targetConversationId, false)
 
         const { data, error } = await supabase
           .from("messages")
@@ -432,6 +451,31 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     [isAuthenticated, user, supabase, state.messages, refreshConversations],
   )
 
+  // Set typing status
+  const setTypingStatus = useCallback(
+    async (conversationId: string, isTyping: boolean) => {
+      if (!isAuthenticated || !user?.id || !conversationId) {
+        return
+      }
+
+      try {
+        // Update typing status in the database
+        const { error } = await supabase.rpc("update_typing_status", {
+          p_conversation_id: conversationId,
+          p_user_id: user.id,
+          p_is_typing: isTyping,
+        })
+
+        if (error) {
+          console.error("Error updating typing status:", error)
+        }
+      } catch (err) {
+        console.error("Unexpected error updating typing status:", err)
+      }
+    },
+    [isAuthenticated, user, supabase],
+  )
+
   // Delete a conversation
   const deleteConversation = useCallback(
     async (conversationId: string): Promise<boolean> => {
@@ -564,6 +608,28 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           refreshConversations()
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "typing_status",
+        },
+        async (payload) => {
+          const typingStatus = payload.new as any
+
+          // Only update typing status if it's not the current user
+          if (typingStatus.user_id !== user.id) {
+            dispatch({
+              type: "SET_TYPING",
+              payload: {
+                conversationId: typingStatus.conversation_id,
+                isTyping: typingStatus.is_typing,
+              },
+            })
+          }
+        },
+      )
       .subscribe()
 
     return () => {
@@ -588,6 +654,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         refreshConversations,
         markMessagesAsRead,
         deleteConversation,
+        setTypingStatus,
         clearError,
       }}
     >

@@ -22,7 +22,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useAuth } from "@/contexts/auth-context"
-import { toast } from "@/components/ui/use-toast"
+import { UserSearchDialog } from "./user-search-dialog"
 
 export function ConversationList() {
   const { state, setActiveConversation, deleteConversation, refreshConversations } = useMessaging()
@@ -30,6 +30,7 @@ export function ConversationList() {
   const [searchQuery, setSearchQuery] = useState("")
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null)
+  const [userSearchOpen, setUserSearchOpen] = useState(false)
 
   const filteredConversations = useMemo(() => {
     return state.conversations.filter((conversation) =>
@@ -79,11 +80,7 @@ export function ConversationList() {
   }
 
   const handleCreateNewConversation = () => {
-    // This would typically open a dialog to select a user
-    toast({
-      title: "Create Conversation",
-      description: "This feature will be implemented soon!",
-    })
+    setUserSearchOpen(true)
   }
 
   if (state.error) {
@@ -196,6 +193,8 @@ export function ConversationList() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <UserSearchDialog open={userSearchOpen} onOpenChange={setUserSearchOpen} />
     </div>
   )
 }

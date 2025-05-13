@@ -43,4 +43,5 @@ export interface MessagingState {
   messages: Record<string, Message[]>
   isLoading: boolean
   error: string | null
+  typingUsers: Record<string, boolean>
 }

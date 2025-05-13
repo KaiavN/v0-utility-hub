@@ -5,18 +5,22 @@ import { useMessaging } from "@/contexts/messaging-context"
 import { useAuth } from "@/contexts/auth-context"
 import { MessageItem } from "./message-item"
 import { MessageComposer } from "./message-composer"
+import { TypingIndicator } from "./typing-indicator"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { AlertCircle, ArrowLeft, MoreVertical } from "lucide-react"
+import { AlertCircle, ArrowLeft, MoreVertical, Info } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { format } from "date-fns"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export function ConversationView() {
   const { state, setActiveConversation, deleteConversation } = useMessaging()
   const { user } = useAuth()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [showBackButton, setShowBackButton] = useState(false)
+  const [showDateDivider, setShowDateDivider] = useState<Record<string, boolean>>({})
 
   const { activeConversation } = state
   const conversation = activeConversation ? state.conversations.find((c) => c.id === activeConversation) : null
@@ -34,11 +38,27 @@ export function ConversationView() {
     return () => window.removeEventListener("resize", handleResize)
   }, [])
 
-  // Scroll to bottom when messages change
+  // Scroll to bottom when messages change or typing status changes
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
     }
+  }, [conversationMessages, activeConversation ? state.typingUsers[activeConversation] : false])
+
+  // Group messages by date for date dividers
+  useEffect(() => {
+    const dates: Record<string, boolean> = {}
+
+    conversationMessages.forEach((message, index) => {
+      const messageDate = new Date(message.created_at).toDateString()
+
+      // If this is the first message or the date is different from the previous message
+      if (index === 0 || new Date(conversationMessages[index - 1].created_at).toDateString() !== messageDate) {
+        dates[messageDate] = true
+      }
+    })
+
+    setShowDateDivider(dates)
   }, [conversationMessages])
 
   const handleDeleteConversation = async () => {
@@ -58,6 +78,33 @@ export function ConversationView() {
       .join("")
       .toUpperCase()
       .substring(0, 2)
+  }
+
+  const renderDateDivider = (dateStr: string) => {
+    try {
+      const date = new Date(dateStr)
+      const today = new Date()
+      const yesterday = new Date(today)
+      yesterday.setDate(yesterday.getDate() - 1)
+
+      let displayDate
+      if (date.toDateString() === today.toDateString()) {
+        displayDate = "Today"
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        displayDate = "Yesterday"
+      } else {
+        displayDate = format(date, "MMMM d, yyyy")
+      }
+
+      return (
+        <div className="flex items-center justify-center my-4">
+          <div className="bg-muted px-3 py-1 rounded-full text-xs text-muted-foreground">{displayDate}</div>
+        </div>
+      )
+    } catch (error) {
+      console.error("Invalid date format:", dateStr)
+      return null
+    }
   }
 
   if (!activeConversation || !conversation) {
@@ -98,6 +145,11 @@ export function ConversationView() {
           </Avatar>
           <div>
             <h3 className="font-medium">{conversation.participantName || "Unknown"}</h3>
+            {conversation.unreadCount > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {conversation.unreadCount} unread {conversation.unreadCount === 1 ? "message" : "messages"}
+              </p>
+            )}
           </div>
         </div>
 
@@ -109,6 +161,10 @@ export function ConversationView() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem>
+              <Info className="h-4 w-4 mr-2" />
+              View Profile
+            </DropdownMenuItem>
             <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={handleDeleteConversation}>
               Delete Conversation
             </DropdownMenuItem>
@@ -119,14 +175,34 @@ export function ConversationView() {
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-4">
           {state.isLoading && conversationMessages.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8">Loading messages...</div>
+            <div className="space-y-4">
+              <Skeleton className="h-12 w-3/4" />
+              <Skeleton className="h-12 w-1/2 ml-auto" />
+              <Skeleton className="h-12 w-2/3" />
+              <Skeleton className="h-12 w-3/5 ml-auto" />
+            </div>
           ) : conversationMessages.length === 0 ? (
             <div className="text-center text-muted-foreground py-8">No messages yet. Start the conversation!</div>
           ) : (
-            conversationMessages.map((message) => (
-              <MessageItem key={message.id} message={message} isOwnMessage={message.sender_id === user?.id} />
-            ))
+            conversationMessages.map((message, index) => {
+              const messageDate = new Date(message.created_at).toDateString()
+              const showDivider =
+                index === 0 || new Date(conversationMessages[index - 1].created_at).toDateString() !== messageDate
+
+              return (
+                <div key={message.id}>
+                  {showDivider && renderDateDivider(message.created_at)}
+                  <MessageItem message={message} isOwnMessage={message.sender_id === user?.id} />
+                </div>
+              )
+            })
           )}
+
+          {/* Typing indicator */}
+          {activeConversation && state.typingUsers[activeConversation] && (
+            <TypingIndicator conversationId={activeConversation} />
+          )}
+
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
