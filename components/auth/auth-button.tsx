@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/auth-context"
-import { LogOut, User } from "lucide-react"
+import { LogOut, User, Loader2 } from "lucide-react"
 import Link from "next/link"
 import {
   DropdownMenu,
@@ -13,12 +13,18 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { GitHubLoginButton } from "./github-login-button"
 import { GoogleLoginButton } from "./google-login-button"
+import { LogoutConfirmationDialog } from "./logout-confirmation-dialog"
 
 export function AuthButton() {
-  const { user, logout } = useAuth()
+  const { user, isLoading } = useAuth()
 
-  const handleLogout = async () => {
-    await logout()
+  if (isLoading) {
+    return (
+      <Button variant="outline" size="sm" disabled>
+        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+        Loading...
+      </Button>
+    )
   }
 
   if (user) {
@@ -46,10 +52,12 @@ export function AuthButton() {
             <Link href="/settings">Settings</Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleLogout} className="text-red-500">
-            <LogOut className="h-4 w-4 mr-2" />
-            Logout
-          </DropdownMenuItem>
+          <LogoutConfirmationDialog>
+            <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="text-red-500">
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </DropdownMenuItem>
+          </LogoutConfirmationDialog>
         </DropdownMenuContent>
       </DropdownMenu>
     )

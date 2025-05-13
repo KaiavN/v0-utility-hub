@@ -22,6 +22,7 @@ interface AuthContextType {
   logout: () => Promise<void>
   profile: any | null
   updateProfile: (data: any) => Promise<boolean>
+  deleteAccount: () => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -378,6 +379,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Delete account function
+  const deleteAccount = async (): Promise<boolean> => {
+    if (!user) return false
+
+    try {
+      setIsLoading(true)
+
+      // First delete user data (profiles, etc.)
+      const { error: profileDeleteError } = await supabase.from("profiles").delete().eq("id", user.id)
+
+      if (profileDeleteError) {
+        console.error("Error deleting profile:", profileDeleteError)
+        toast({
+          title: "Delete Account Failed",
+          description: "Failed to delete your account data. Please try again.",
+          variant: "destructive",
+        })
+        return false
+      }
+
+      // Then delete the user authentication record
+      const { error: authDeleteError } = await supabase.auth.admin.deleteUser(user.id)
+
+      if (authDeleteError) {
+        console.error("Error deleting auth user:", authDeleteError)
+        toast({
+          title: "Delete Account Failed",
+          description: "Failed to delete your account. Please try again.",
+          variant: "destructive",
+        })
+        return false
+      }
+
+      // Sign out the user
+      await supabase.auth.signOut()
+
+      // Clear local state
+      setUser(null)
+      setProfile(null)
+      setIsAuthenticated(false)
+
+      toast({
+        title: "Account Deleted",
+        description: "Your account has been successfully deleted.",
+      })
+
+      router.push("/")
+      return true
+    } catch (error) {
+      console.error("Delete account error:", error)
+      toast({
+        title: "Delete Account Failed",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive",
+      })
+      return false
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   return (
     <AuthContext.Provider
       value={{
@@ -389,6 +451,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginWithGoogle,
         logout,
         updateProfile,
+        deleteAccount,
       }}
     >
       {children}

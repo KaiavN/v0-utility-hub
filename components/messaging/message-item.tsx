@@ -1,32 +1,59 @@
 "use client"
 
+import { formatDistanceToNow } from "date-fns"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import type { Message } from "@/lib/messaging-types"
-import { useAuth } from "@/contexts/auth-context"
-import { format } from "date-fns"
-import { cn } from "@/lib/utils"
+import { CheckCheck } from "lucide-react"
 
 interface MessageItemProps {
   message: Message
+  isCurrentUser: boolean
 }
 
-export function MessageItem({ message }: MessageItemProps) {
-  const { user } = useAuth()
-  const isCurrentUser = user?.id === message.senderId
+export function MessageItem({ message, isCurrentUser }: MessageItemProps) {
+  const formatTimestamp = (timestamp: string) => {
+    try {
+      return formatDistanceToNow(new Date(timestamp), { addSuffix: true })
+    } catch (error) {
+      console.error("Invalid date format:", error)
+      return ""
+    }
+  }
 
-  const formattedTime = format(new Date(message.timestamp), "h:mm a")
+  const getInitials = (name: string | undefined) => {
+    if (!name) return "??"
+    return name
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase()
+      .substring(0, 2)
+  }
 
   return (
-    <div className={cn("flex mb-4", isCurrentUser ? "justify-end" : "justify-start")}>
-      <div
-        className={cn(
-          "max-w-[80%] rounded-lg px-4 py-2",
-          isCurrentUser ? "bg-primary text-primary-foreground" : "bg-muted",
+    <div className={`flex ${isCurrentUser ? "justify-end" : "justify-start"}`}>
+      <div className={`flex max-w-[80%] ${isCurrentUser ? "flex-row-reverse" : ""}`}>
+        {!isCurrentUser && (
+          <Avatar className="h-8 w-8 mr-2">
+            {message.sender_avatar && (
+              <AvatarImage src={message.sender_avatar || "/placeholder.svg"} alt={message.sender_name || ""} />
+            )}
+            <AvatarFallback>{getInitials(message.sender_name)}</AvatarFallback>
+          </Avatar>
         )}
-      >
-        <div className="flex flex-col">
-          <div className="break-words">{message.content}</div>
-          <div className={cn("text-xs mt-1", isCurrentUser ? "text-primary-foreground/80" : "text-muted-foreground")}>
-            {formattedTime}
+        <div>
+          <div
+            className={`rounded-lg px-4 py-2 ${isCurrentUser ? "bg-primary text-primary-foreground ml-2" : "bg-muted"}`}
+          >
+            {message.content}
+          </div>
+          <div className={`flex items-center text-xs text-muted-foreground mt-1 ${isCurrentUser ? "justify-end" : ""}`}>
+            <span>{formatTimestamp(message.created_at)}</span>
+            {isCurrentUser && (
+              <span className="ml-1 flex items-center">
+                <CheckCheck className={`h-3 w-3 ${message.read ? "text-primary" : ""}`} />
+              </span>
+            )}
           </div>
         </div>
       </div>

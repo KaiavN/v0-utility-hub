@@ -17,18 +17,24 @@ export interface Conversation {
 
 export interface Profile {
   id: string
-  display_name: string
+  display_name: string | null
+  username: string | null
   avatar_url: string | null
-  email: string
+  email: string | null
 }
 
 export interface ConversationWithParticipants extends Conversation {
   participants: Profile[]
+  lastMessage?: string | null
+  lastMessageTimestamp?: string | null
+  unreadCount?: number
+  participantId?: string | null
+  participantName?: string | null
 }
 
 export interface ConversationSummary {
   id: string
-  title: string
+  title: string | null
   lastMessage: string | null
   lastMessageTime: string | null
   unreadCount: number
