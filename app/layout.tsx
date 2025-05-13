@@ -11,6 +11,7 @@ import { Toaster } from "@/components/ui/toaster"
 import { FeatureTutorialButton } from "@/components/feature-tutorial-button"
 import { EnvDebug } from "@/components/debug/env-debug"
 import { SupabaseInitializer } from "@/components/supabase-initializer"
+import { MessagingProvider } from "@/contexts/messaging-context"
 
 export const metadata: Metadata = {
   title: "Utility Hub",
@@ -61,11 +62,13 @@ export default function RootLayout({ children }: Props) {
 
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AuthProvider>
-            <ClientLayout>
-              {children}
-              {/* Add DataIntegrityMonitor for automatic data maintenance */}
-              <DataIntegrityMonitor />
-            </ClientLayout>
+            <MessagingProvider>
+              <ClientLayout>
+                {children}
+                {/* Add DataIntegrityMonitor for automatic data maintenance */}
+                <DataIntegrityMonitor />
+              </ClientLayout>
+            </MessagingProvider>
             <Toaster />
           </AuthProvider>
         </ThemeProvider>
