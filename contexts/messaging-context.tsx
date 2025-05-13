@@ -99,14 +99,6 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: "SET_LOADING", payload: true })
       clearError()
 
-      // Use mock data for now to prevent loading state
-      const mockConversations: ConversationSummary[] = []
-      dispatch({ type: "SET_CONVERSATIONS", payload: mockConversations })
-      dispatch({ type: "SET_LOADING", payload: false })
-      return
-
-      // Original code commented out to prevent infinite loading
-      /*
       const response = await fetch(`/api/messages/conversations?userId=${user.id}`)
 
       if (!response.ok) {
@@ -122,7 +114,6 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         console.error("Invalid conversations data:", data)
         dispatch({ type: "SET_CONVERSATIONS", payload: [] })
       }
-      */
     } catch (err) {
       console.error("Error fetching conversations:", err)
       dispatch({ type: "SET_ERROR", payload: err instanceof Error ? err.message : "Failed to load conversations" })

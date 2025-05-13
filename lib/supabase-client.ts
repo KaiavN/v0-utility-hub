@@ -130,13 +130,18 @@ export function createSupabaseClient() {
 
   // If we have the config but no instance, create it
   if (supabaseConfig) {
-    supabaseInstance = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-      },
-    })
-    return supabaseInstance
+    try {
+      supabaseInstance = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+        },
+      })
+      return supabaseInstance
+    } catch (error) {
+      console.error("Error creating Supabase client with config:", error)
+      return createDummyClient()
+    }
   }
 
   // If we don't have the config yet, start fetching it and return a dummy client
@@ -144,12 +149,16 @@ export function createSupabaseClient() {
     fetchSupabaseConfig()
       .then((config) => {
         supabaseConfig = config
-        supabaseInstance = createClient(config.url, config.anonKey, {
-          auth: {
-            persistSession: true,
-            autoRefreshToken: true,
-          },
-        })
+        try {
+          supabaseInstance = createClient(config.url, config.anonKey, {
+            auth: {
+              persistSession: true,
+              autoRefreshToken: true,
+            },
+          })
+        } catch (error) {
+          console.error("Error creating Supabase client after fetching config:", error)
+        }
       })
       .catch((error) => {
         console.error("Error fetching Supabase config:", error)
@@ -157,6 +166,7 @@ export function createSupabaseClient() {
   }
 
   // Return a dummy client until the real one is ready
+  console.log("Returning dummy Supabase client until real one is ready")
   return createDummyClient()
 }
 

@@ -162,6 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setUser(userData)
         setIsAuthenticated(true)
+        setIsLoading(false)
 
         // Ensure profile exists
         await ensureUserProfile(userData)
@@ -175,6 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null)
         setProfile(null)
         setIsAuthenticated(false)
+        setIsLoading(false)
       }
     })
 

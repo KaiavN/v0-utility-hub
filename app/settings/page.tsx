@@ -11,7 +11,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/components/ui/use-toast"
 import { Loader2, User, Shield, Key, LogOut } from "lucide-react"
-import { AuthGuard } from "@/components/auth/auth-guard"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
@@ -19,24 +18,39 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 // Import the DbRepairButton component at the top of the file
 import { DbRepairButton } from "@/components/auth/db-repair-button"
 import { MobileSettings } from "@/components/mobile-settings"
+import { useRouter } from "next/navigation"
 
 export default function SettingsPage() {
   const { user, isLoading: authLoading, updateProfile, logout, profile } = useAuth()
-  const [username, setUsername] = useState(user?.username || "")
-  const [displayName, setDisplayName] = useState(user?.displayName || "")
+  const [username, setUsername] = useState("")
+  const [displayName, setDisplayName] = useState("")
   const [bio, setBio] = useState("")
-  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "")
+  const [avatarUrl, setAvatarUrl] = useState("")
   const [isUpdating, setIsUpdating] = useState(false)
   const [emailNotifications, setEmailNotifications] = useState(true)
+  const [pageLoading, setPageLoading] = useState(true)
   const { toast } = useToast()
+  const router = useRouter()
 
   useEffect(() => {
     if (user) {
       setUsername(user.username || "")
       setDisplayName(user.displayName || "")
       setAvatarUrl(user.avatarUrl || "")
+      setBio(profile?.bio || "")
     }
-  }, [user])
+
+    // Set page as loaded once auth state is determined
+    if (!authLoading) {
+      setPageLoading(false)
+    }
+
+    // Redirect if not authenticated
+    if (!authLoading && !user) {
+      console.log("User not authenticated, redirecting from settings page")
+      router.push("/")
+    }
+  }, [user, profile, authLoading, router])
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -78,6 +92,7 @@ export default function SettingsPage() {
         username,
         displayName,
         avatarUrl,
+        bio,
       })
 
       if (success) {
@@ -106,6 +121,31 @@ export default function SettingsPage() {
     })
   }
 
+  // Show loading state while checking auth
+  if (authLoading || pageLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading settings...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // If not authenticated, show sign-in message
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <User className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+          <h2 className="text-2xl font-bold mb-2">Sign in to access settings</h2>
+          <p className="text-muted-foreground mb-4">You need to be signed in to view and edit your settings</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div>
       {/* Mobile-optimized settings */}
@@ -113,206 +153,192 @@ export default function SettingsPage() {
 
       {/* Desktop settings (existing content) */}
       <div className="hidden md:block">
-        <AuthGuard
-          fallback={
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <User className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <h2 className="text-2xl font-bold mb-2">Sign in to access settings</h2>
-                <p className="text-muted-foreground mb-4">You need to be signed in to view and edit your settings</p>
-              </div>
-            </div>
-          }
-        >
-          <div className="container py-10">
-            <div className="max-w-4xl mx-auto">
-              <h1 className="text-3xl font-bold mb-6">Settings</h1>
+        <div className="container py-10">
+          <div className="max-w-4xl mx-auto">
+            <h1 className="text-3xl font-bold mb-6">Settings</h1>
 
-              <Tabs defaultValue="profile" className="w-full">
-                <TabsList className="grid w-full grid-cols-3 mb-8">
-                  <TabsTrigger value="profile">
-                    <User className="h-4 w-4 mr-2" />
-                    Profile
-                  </TabsTrigger>
-                  <TabsTrigger value="account">
-                    <Shield className="h-4 w-4 mr-2" />
-                    Account
-                  </TabsTrigger>
-                  <TabsTrigger value="security">
-                    <Key className="h-4 w-4 mr-2" />
-                    Security
-                  </TabsTrigger>
-                </TabsList>
+            <Tabs defaultValue="profile" className="w-full">
+              <TabsList className="grid w-full grid-cols-3 mb-8">
+                <TabsTrigger value="profile">
+                  <User className="h-4 w-4 mr-2" />
+                  Profile
+                </TabsTrigger>
+                <TabsTrigger value="account">
+                  <Shield className="h-4 w-4 mr-2" />
+                  Account
+                </TabsTrigger>
+                <TabsTrigger value="security">
+                  <Key className="h-4 w-4 mr-2" />
+                  Security
+                </TabsTrigger>
+              </TabsList>
 
-                <TabsContent value="profile">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Profile Information</CardTitle>
-                      <CardDescription>Update your profile information and how others see you</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <form onSubmit={handleUpdateProfile}>
-                        <div className="grid gap-6">
-                          <div className="flex items-center gap-6">
-                            <Avatar className="h-20 w-20">
-                              <AvatarImage src={avatarUrl || ""} alt={username} />
-                              <AvatarFallback>{username?.substring(0, 2).toUpperCase()}</AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <Label htmlFor="avatar">Profile Picture</Label>
-                              <Input
-                                id="avatar"
-                                value={avatarUrl || ""}
-                                onChange={(e) => setAvatarUrl(e.target.value)}
-                                placeholder="https://example.com/avatar.jpg"
-                                className="mt-1"
-                              />
-                              <p className="text-sm text-muted-foreground mt-1">Enter a URL for your profile picture</p>
-                            </div>
-                          </div>
-
-                          <div className="grid gap-2">
-                            <Label htmlFor="email">Email</Label>
-                            <Input id="email" type="email" value={user?.email || ""} disabled className="bg-muted" />
-                            <p className="text-sm text-muted-foreground">Your email cannot be changed</p>
-                          </div>
-
-                          <div className="grid gap-2">
-                            <Label htmlFor="username">Username</Label>
-                            <Input
-                              id="username"
-                              value={username}
-                              onChange={(e) => setUsername(e.target.value)}
-                              disabled={isUpdating}
-                            />
-                            <p className="text-sm text-muted-foreground">
-                              This is your public username visible to others
-                            </p>
-                          </div>
-
-                          <div className="grid gap-2">
-                            <Label htmlFor="displayName">Display Name</Label>
-                            <Input
-                              id="displayName"
-                              value={displayName}
-                              onChange={(e) => setDisplayName(e.target.value)}
-                              disabled={isUpdating}
-                              placeholder="Your full name"
-                            />
-                            <p className="text-sm text-muted-foreground">
-                              This is your name as it will appear to others
-                            </p>
-                          </div>
-
-                          <div className="grid gap-2">
-                            <Label htmlFor="bio">Bio</Label>
-                            <Textarea
-                              id="bio"
-                              value={bio}
-                              onChange={(e) => setBio(e.target.value)}
-                              disabled={isUpdating}
-                              placeholder="Tell us a little about yourself"
-                              rows={4}
-                            />
-                          </div>
-
-                          <Button type="submit" disabled={isUpdating || authLoading}>
-                            {isUpdating ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Updating...
-                              </>
-                            ) : (
-                              "Update Profile"
-                            )}
-                          </Button>
-                        </div>
-                      </form>
-                    </CardContent>
-                  </Card>
-                  {profile?.role === "admin" && (
-                    <div className="mt-6 p-4 border rounded-md">
-                      <h3 className="text-lg font-medium mb-4">Admin Database Tools</h3>
-                      <DbRepairButton />
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="account">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Account Preferences</CardTitle>
-                      <CardDescription>Manage your account settings and preferences</CardDescription>
-                    </CardHeader>
-                    <CardContent>
+              <TabsContent value="profile">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Profile Information</CardTitle>
+                    <CardDescription>Update your profile information and how others see you</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <form onSubmit={handleUpdateProfile}>
                       <div className="grid gap-6">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-6">
+                          <Avatar className="h-20 w-20">
+                            <AvatarImage src={avatarUrl || ""} alt={username} />
+                            <AvatarFallback>{username?.substring(0, 2).toUpperCase() || "U"}</AvatarFallback>
+                          </Avatar>
                           <div>
-                            <h3 className="font-medium">Email Notifications</h3>
-                            <p className="text-sm text-muted-foreground">
-                              Receive email notifications about account activity
-                            </p>
+                            <Label htmlFor="avatar">Profile Picture</Label>
+                            <Input
+                              id="avatar"
+                              value={avatarUrl || ""}
+                              onChange={(e) => setAvatarUrl(e.target.value)}
+                              placeholder="https://example.com/avatar.jpg"
+                              className="mt-1"
+                            />
+                            <p className="text-sm text-muted-foreground mt-1">Enter a URL for your profile picture</p>
                           </div>
-                          <Switch
-                            checked={emailNotifications}
-                            onCheckedChange={setEmailNotifications}
-                            aria-label="Toggle email notifications"
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label htmlFor="email">Email</Label>
+                          <Input id="email" type="email" value={user?.email || ""} disabled className="bg-muted" />
+                          <p className="text-sm text-muted-foreground">Your email cannot be changed</p>
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label htmlFor="username">Username</Label>
+                          <Input
+                            id="username"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
+                            disabled={isUpdating}
+                          />
+                          <p className="text-sm text-muted-foreground">
+                            This is your public username visible to others
+                          </p>
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label htmlFor="displayName">Display Name</Label>
+                          <Input
+                            id="displayName"
+                            value={displayName}
+                            onChange={(e) => setDisplayName(e.target.value)}
+                            disabled={isUpdating}
+                            placeholder="Your full name"
+                          />
+                          <p className="text-sm text-muted-foreground">This is your name as it will appear to others</p>
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label htmlFor="bio">Bio</Label>
+                          <Textarea
+                            id="bio"
+                            value={bio}
+                            onChange={(e) => setBio(e.target.value)}
+                            disabled={isUpdating}
+                            placeholder="Tell us a little about yourself"
+                            rows={4}
                           />
                         </div>
 
-                        <Separator />
+                        <Button type="submit" disabled={isUpdating || authLoading}>
+                          {isUpdating ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Updating...
+                            </>
+                          ) : (
+                            "Update Profile"
+                          )}
+                        </Button>
+                      </div>
+                    </form>
+                  </CardContent>
+                </Card>
+                {profile?.role === "admin" && (
+                  <div className="mt-6 p-4 border rounded-md">
+                    <h3 className="text-lg font-medium mb-4">Admin Database Tools</h3>
+                    <DbRepairButton />
+                  </div>
+                )}
+              </TabsContent>
 
+              <TabsContent value="account">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Account Preferences</CardTitle>
+                    <CardDescription>Manage your account settings and preferences</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-6">
+                      <div className="flex items-center justify-between">
                         <div>
-                          <h3 className="font-medium mb-2">Account Actions</h3>
-                          <div className="space-y-2">
-                            <Button variant="outline" className="w-full justify-start" onClick={handleLogout}>
-                              <LogOut className="mr-2 h-4 w-4" />
-                              Log out of your account
-                            </Button>
-                            <Button variant="destructive" className="w-full justify-start">
-                              Delete your account
-                            </Button>
-                          </div>
+                          <h3 className="font-medium">Email Notifications</h3>
+                          <p className="text-sm text-muted-foreground">
+                            Receive email notifications about account activity
+                          </p>
+                        </div>
+                        <Switch
+                          checked={emailNotifications}
+                          onCheckedChange={setEmailNotifications}
+                          aria-label="Toggle email notifications"
+                        />
+                      </div>
+
+                      <Separator />
+
+                      <div>
+                        <h3 className="font-medium mb-2">Account Actions</h3>
+                        <div className="space-y-2">
+                          <Button variant="outline" className="w-full justify-start" onClick={handleLogout}>
+                            <LogOut className="mr-2 h-4 w-4" />
+                            Log out of your account
+                          </Button>
+                          <Button variant="destructive" className="w-full justify-start">
+                            Delete your account
+                          </Button>
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-                <TabsContent value="security">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Security Settings</CardTitle>
-                      <CardDescription>Manage your password and security preferences</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid gap-6">
-                        <div>
-                          <h3 className="font-medium mb-2">Change Password</h3>
-                          <p className="text-sm text-muted-foreground mb-4">
-                            To change your password, use the "Forgot Password" option on the login screen. We'll send
-                            you an email with instructions to reset your password.
-                          </p>
-                          <Button variant="outline">Send Password Reset Email</Button>
-                        </div>
-
-                        <Separator />
-
-                        <div>
-                          <h3 className="font-medium mb-2">Two-Factor Authentication</h3>
-                          <p className="text-sm text-muted-foreground mb-4">
-                            Add an extra layer of security to your account by enabling two-factor authentication.
-                          </p>
-                          <Button variant="outline">Enable Two-Factor Authentication</Button>
-                        </div>
+              <TabsContent value="security">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Security Settings</CardTitle>
+                    <CardDescription>Manage your password and security preferences</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-6">
+                      <div>
+                        <h3 className="font-medium mb-2">Change Password</h3>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          To change your password, use the "Forgot Password" option on the login screen. We'll send you
+                          an email with instructions to reset your password.
+                        </p>
+                        <Button variant="outline">Send Password Reset Email</Button>
                       </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              </Tabs>
-            </div>
+
+                      <Separator />
+
+                      <div>
+                        <h3 className="font-medium mb-2">Two-Factor Authentication</h3>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          Add an extra layer of security to your account by enabling two-factor authentication.
+                        </p>
+                        <Button variant="outline">Enable Two-Factor Authentication</Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
           </div>
-        </AuthGuard>
+        </div>
       </div>
     </div>
   )

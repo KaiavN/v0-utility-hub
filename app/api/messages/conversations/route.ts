@@ -1,5 +1,6 @@
-import { createSupabaseServerClient } from "@/lib/supabase-server"
 import { NextResponse } from "next/server"
+import { createSupabaseAdmin } from "@/lib/supabase-client"
+import type { ConversationSummary } from "@/lib/messaging-types"
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
@@ -10,21 +11,16 @@ export async function GET(request: Request) {
   }
 
   try {
-    const supabase = createSupabaseServerClient()
+    const supabase = createSupabaseAdmin()
 
-    // Return empty conversations array for now to prevent loading issues
-    return NextResponse.json({ conversations: [] })
-
-    // Original code commented out
-    /*
     // Get all conversations where the user is a participant
-    const { data: participations, error: participationsError } = await supabase
+    const { data: participations, error: partError } = await supabase
       .from("conversation_participants")
       .select("conversation_id")
       .eq("user_id", userId)
 
-    if (participationsError) {
-      console.error("Error fetching participations:", participationsError)
+    if (partError) {
+      console.error("Supabase error:", partError)
       return NextResponse.json({ error: "Failed to fetch conversations" }, { status: 500 })
     }
 
@@ -34,83 +30,80 @@ export async function GET(request: Request) {
 
     const conversationIds = participations.map((p) => p.conversation_id)
 
-    // Get conversation details with participants
-    const { data: conversations, error: conversationsError } = await supabase
-      .from("conversations")
-      .select(`
-        id,
-        created_at,
-        updated_at,
-        conversation_participants!inner (
-          user_id,
-          profiles:user_id (
-            id,
-            display_name,
-            avatar_url,
-            email
-          )
-        )
-      `)
-      .in("id", conversationIds)
-      .order("updated_at", { ascending: false })
+    // For each conversation, get the other participant
+    const conversations: ConversationSummary[] = []
 
-    if (conversationsError) {
-      console.error("Error fetching conversations:", conversationsError)
-      return NextResponse.json({ error: "Failed to fetch conversations" }, { status: 500 })
-    }
-
-    // Format conversations for the client
-    const formattedConversations = await Promise.all(
-      conversations.map(async (conversation) => {
-        // Find the other participant (not the current user)
-        const otherParticipant = conversation.conversation_participants.find(
-          (p) => p.user_id !== userId
-        )?.profiles
-
-        if (!otherParticipant) {
-          console.error("Could not find other participant for conversation:", conversation.id)
-          return null
-        }
-
-        // Get the last message
-        const { data: lastMessage } = await supabase
-          .from("messages")
-          .select("content, created_at, sender_id")
-          .eq("conversation_id", conversation.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
+    for (const convId of conversationIds) {
+      try {
+        // Get the other participant
+        const { data: otherParticipant, error: partError } = await supabase
+          .from("conversation_participants")
+          .select("user_id, profiles:user_id(display_name)")
+          .eq("conversation_id", convId)
+          .neq("user_id", userId)
           .single()
 
-        // Count unread messages
+        if (partError) {
+          console.error("Error fetching other participant:", partError)
+          continue
+        }
+
+        if (!otherParticipant) continue
+
+        // Get the latest message
+        const { data: latestMessages, error: msgError } = await supabase
+          .from("messages")
+          .select("*")
+          .eq("conversation_id", convId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+
+        if (msgError) {
+          console.error("Error fetching latest message:", msgError)
+          continue
+        }
+
+        // Get unread count
         const { count: unreadCount, error: countError } = await supabase
           .from("messages")
           .select("*", { count: "exact", head: true })
-          .eq("conversation_id", conversation.id)
+          .eq("conversation_id", convId)
           .eq("read", false)
           .neq("sender_id", userId)
 
         if (countError) {
-          console.error("Error counting unread messages:", countError)
+          console.error("Error fetching unread count:", countError)
+          continue
         }
 
-        return {
-          id: conversation.id,
-          participantId: otherParticipant.id,
-          participantName: otherParticipant.display_name || otherParticipant.email || "Unknown User",
-          lastMessage: lastMessage?.content || null,
-          lastMessageTimestamp: lastMessage?.created_at || null,
+        const participantName =
+          otherParticipant.profiles?.display_name || `User ${otherParticipant.user_id.substring(0, 5)}`
+        const latestMessage = latestMessages && latestMessages[0]
+
+        conversations.push({
+          id: convId,
+          participantId: otherParticipant.user_id,
+          participantName,
+          lastMessage: latestMessage?.content || null,
+          lastMessageTimestamp: latestMessage?.created_at || null,
           unreadCount: unreadCount || 0,
-        }
-      })
-    )
+        })
+      } catch (error) {
+        console.error(`Error processing conversation ${convId}:`, error)
+        // Continue with other conversations
+      }
+    }
 
-    // Filter out any null values
-    const validConversations = formattedConversations.filter(Boolean)
+    // Sort by latest message
+    conversations.sort((a, b) => {
+      if (!a.lastMessageTimestamp) return 1
+      if (!b.lastMessageTimestamp) return -1
+      return new Date(b.lastMessageTimestamp).getTime() - new Date(a.lastMessageTimestamp).getTime()
+    })
 
-    return NextResponse.json({ conversations: validConversations })
-    */
+    return NextResponse.json({ conversations })
   } catch (error) {
-    console.error("Unexpected error in conversations API:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("Error fetching conversations:", error)
+    return NextResponse.json({ error: "Failed to fetch conversations" }, { status: 500 })
   }
 }

@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -27,21 +27,38 @@ export default function ProfilePage() {
   const { user, profile, isLoading, updateProfile, deleteAccount } = useAuth()
   const router = useRouter()
   const [formData, setFormData] = useState({
-    displayName: profile?.display_name || user?.name || "",
-    avatarUrl: profile?.avatar_url || user?.avatarUrl || "",
-    bio: profile?.bio || "",
+    displayName: "",
+    avatarUrl: "",
+    bio: "",
   })
   const [isSaving, setIsSaving] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [pageLoading, setPageLoading] = useState(true)
 
-  // Redirect if not authenticated
-  if (!isLoading && !user) {
-    router.push("/")
-    return null
-  }
+  // Update form data when user/profile data is available
+  useEffect(() => {
+    if (user || profile) {
+      setFormData({
+        displayName: profile?.display_name || user?.name || "",
+        avatarUrl: profile?.avatar_url || user?.avatarUrl || "",
+        bio: profile?.bio || "",
+      })
+    }
 
-  if (isLoading) {
+    // Set page as loaded once auth state is determined
+    if (!isLoading) {
+      setPageLoading(false)
+    }
+
+    // Redirect if not authenticated
+    if (!isLoading && !user) {
+      console.log("User not authenticated, redirecting from profile page")
+      router.push("/")
+    }
+  }, [user, profile, isLoading, router])
+
+  if (isLoading || pageLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
@@ -50,6 +67,10 @@ export default function ProfilePage() {
         </div>
       </div>
     )
+  }
+
+  if (!user) {
+    return null // Will redirect in useEffect
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -96,11 +117,13 @@ export default function ProfilePage() {
                   <AvatarImage src={formData.avatarUrl || ""} alt={formData.displayName} />
                   <AvatarFallback className="text-lg">
                     {formData.displayName
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")
-                      .toUpperCase()
-                      .substring(0, 2)}
+                      ? formData.displayName
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")
+                          .toUpperCase()
+                          .substring(0, 2)
+                      : "U"}
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
