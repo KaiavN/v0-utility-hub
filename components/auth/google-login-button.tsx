@@ -22,11 +22,19 @@ export function GoogleLoginButton({ className = "", variant = "default", size = 
       setIsClicked(true)
       console.log("Google login button clicked")
 
-      // Clear any existing OAuth state before starting a new flow
-      sessionStorage.removeItem("oauthState")
+      // Clear any existing auth data before starting a new flow
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem("oauthState")
+        localStorage.removeItem("supabase.auth.token")
+      }
 
       await loginWithGoogle()
-      // No need to reset isClicked as we'll be redirected to Google
+
+      // We don't reset isClicked here because we'll be redirected to Google
+      // If we're still here after 5 seconds, something went wrong
+      setTimeout(() => {
+        setIsClicked(false)
+      }, 5000)
     } catch (error) {
       console.error("Error in Google login button:", error)
       toast({

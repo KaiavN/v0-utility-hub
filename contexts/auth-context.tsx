@@ -249,7 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Google authentication function - simplified to avoid state parameter issues
+  // Google authentication function - improved for reliability
   const loginWithGoogle = async (): Promise<void> => {
     try {
       setIsLoading(true)
@@ -257,20 +257,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Store the current path to redirect back after login
       if (typeof window !== "undefined") {
         sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
+
+        // Clear any previous auth errors or state
+        sessionStorage.removeItem("authError")
+        localStorage.removeItem("supabase.auth.token")
       }
 
       const siteUrl = getSiteUrl()
       console.log("Logging in with Google, redirect URL:", `${siteUrl}/auth/callback`)
 
-      // Simplified OAuth call without state parameter
-      const { error } = await supabase.auth.signInWithOAuth({
+      // First, try to sign out to ensure a clean authentication state
+      try {
+        await supabase.auth.signOut({ scope: "local" })
+        console.log("Signed out before Google login")
+      } catch (signOutError) {
+        console.warn("Error signing out before Google login:", signOutError)
+        // Continue anyway
+      }
+
+      // Use a direct URL approach for more reliability
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: `${siteUrl}/auth/callback`,
           scopes: "email profile",
           queryParams: {
             access_type: "offline",
-            prompt: "consent",
+            prompt: "select_account",
           },
         },
       })
@@ -280,6 +293,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         toast({
           title: "Login Failed",
           description: error.message || "Failed to login with Google",
+          variant: "destructive",
+        })
+        setIsLoading(false)
+        return
+      }
+
+      // If we have a URL, redirect to it
+      if (data?.url) {
+        console.log("Redirecting to Google OAuth URL:", data.url)
+        window.location.href = data.url
+      } else {
+        console.error("No redirect URL returned from signInWithOAuth")
+        toast({
+          title: "Login Failed",
+          description: "Failed to initiate Google login",
           variant: "destructive",
         })
         setIsLoading(false)

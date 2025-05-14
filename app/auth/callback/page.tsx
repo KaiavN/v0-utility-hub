@@ -12,12 +12,14 @@ export default function AuthCallbackPage() {
   const [error, setError] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(true)
   const [retryCount, setRetryCount] = useState(0)
+  const [processingStage, setProcessingStage] = useState<string>("Initializing")
   const supabase = getSupabaseClient()
 
   const handleAuth = async () => {
     try {
       console.log("Auth callback processing started")
       setIsProcessing(true)
+      setProcessingStage("Checking URL parameters")
 
       // Check for error in URL
       const url = new URL(window.location.href)
@@ -31,6 +33,7 @@ export default function AuthCallbackPage() {
         // Special handling for bad_oauth_state error - try to continue anyway
         if (errorCode === "bad_oauth_state") {
           console.log("Detected bad_oauth_state error, attempting recovery")
+          setProcessingStage("Recovering from state error")
 
           // Check if we have a session anyway (sometimes the session is created despite the state error)
           const { data: sessionData } = await supabase.auth.getSession()
@@ -69,6 +72,7 @@ export default function AuthCallbackPage() {
       // Handle hash fragment (GitHub often returns tokens this way)
       if (window.location.hash) {
         console.log("Processing hash fragment")
+        setProcessingStage("Processing hash fragment")
 
         try {
           // Try to exchange the hash for a session
@@ -99,50 +103,77 @@ export default function AuthCallbackPage() {
       // Handle code in query params (typical OAuth flow)
       const code = url.searchParams.get("code")
       if (code) {
-        console.log("Processing OAuth code")
+        console.log("Processing OAuth code:", code.substring(0, 10) + "...")
+        setProcessingStage("Exchanging OAuth code for session")
 
         try {
           // Add a small delay before exchanging the code (helps with timing issues)
           await new Promise((resolve) => setTimeout(resolve, 500))
 
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+          console.log("Calling exchangeCodeForSession...")
+          const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
 
           if (exchangeError) {
             console.error("Error exchanging code for session:", exchangeError)
 
             // If this is a transient error, we might want to retry
             if (
-              retryCount < 2 &&
+              retryCount < 3 &&
               (exchangeError.message.includes("Unable to exchange") ||
                 exchangeError.message.includes("network") ||
                 exchangeError.message.includes("timeout"))
             ) {
               setRetryCount((prev) => prev + 1)
               console.log(`Retrying code exchange (attempt ${retryCount + 1})...`)
+              setProcessingStage(`Retrying code exchange (attempt ${retryCount + 1})`)
 
               // Wait a bit longer before retrying
-              await new Promise((resolve) => setTimeout(resolve, 1000))
+              await new Promise((resolve) => setTimeout(resolve, 1500))
               handleAuth()
               return
             }
 
             throw exchangeError
           }
+
+          console.log("Exchange successful, session:", exchangeData.session ? "exists" : "null")
         } catch (codeError) {
           console.error("Error processing OAuth code:", codeError)
+          setProcessingStage("Checking for session after error")
 
           // Try to recover by checking if we have a session anyway
           const { data: sessionData } = await supabase.auth.getSession()
 
           if (!sessionData.session) {
-            throw codeError
-          }
+            // Try a direct sign-in as a last resort
+            console.log("No session found, attempting direct sign-in recovery...")
+            setProcessingStage("Attempting recovery")
 
-          console.log("Found session despite code exchange error, continuing...")
+            try {
+              // Try to refresh the auth state
+              await supabase.auth.refreshSession()
+
+              // Check again for a session
+              const { data: refreshedData } = await supabase.auth.getSession()
+
+              if (!refreshedData.session) {
+                throw codeError
+              }
+
+              console.log("Recovery successful, found session after refresh")
+            } catch (recoveryError) {
+              console.error("Recovery failed:", recoveryError)
+              throw codeError
+            }
+          } else {
+            console.log("Found session despite code exchange error, continuing...")
+          }
         }
       }
 
       // Verify we have a session
+      setProcessingStage("Verifying session")
+      console.log("Verifying session...")
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
 
       if (sessionError) {
@@ -154,6 +185,9 @@ export default function AuthCallbackPage() {
         console.error("No session found after authentication")
         throw new Error("No session found after authentication")
       }
+
+      console.log("Session verified successfully")
+      setProcessingStage("Completing authentication")
 
       // Get the redirect path from session storage or default to home
       const redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
@@ -183,14 +217,14 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     handleAuth()
 
-    // Set a timeout to prevent infinite loading
+    // Set a timeout to prevent infinite loading - increased to 20 seconds
     const timeoutId = setTimeout(() => {
       if (isProcessing) {
         console.log("Auth callback timeout reached")
         setIsProcessing(false)
-        setError("Authentication is taking longer than expected. Please try again.")
+        setError(`Authentication is taking longer than expected (stuck at: ${processingStage}). Please try again.`)
       }
-    }, 10000) // 10 second timeout
+    }, 20000) // 20 second timeout (increased from 10)
 
     return () => clearTimeout(timeoutId)
   }, [router, retryCount])
@@ -210,6 +244,7 @@ export default function AuthCallbackPage() {
                 setError(null)
                 setIsProcessing(true)
                 setRetryCount(0)
+                setProcessingStage("Initializing")
                 handleAuth()
               }}
               variant="outline"
@@ -228,7 +263,7 @@ export default function AuthCallbackPage() {
       <div className="flex flex-col items-center space-y-4">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
         <h1 className="text-xl font-semibold">Completing authentication...</h1>
-        <p className="text-muted-foreground">Please wait while we log you in.</p>
+        <p className="text-muted-foreground">{processingStage}</p>
         {retryCount > 0 && <p className="text-sm text-muted-foreground">Retrying... (Attempt {retryCount})</p>}
       </div>
     </div>
