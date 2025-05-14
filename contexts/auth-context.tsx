@@ -249,26 +249,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Update the loginWithGoogle function to check for sessionStorage availability
+  // Update the loginWithGoogle function to be more reliable
   const loginWithGoogle = async (): Promise<void> => {
     try {
       setIsLoading(true)
 
       // Store the current path to redirect back after login
-      // Check if window is defined first (client-side only)
       if (typeof window !== "undefined") {
-        try {
-          // Only access sessionStorage if we're in the browser
-          sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
+        sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
 
-          // Clear any previous auth errors or state
-          sessionStorage.removeItem("authError")
-          localStorage.removeItem("supabase.auth.token")
-          localStorage.removeItem("supabase.auth.refreshToken")
-        } catch (storageError) {
-          console.warn("Error accessing sessionStorage:", storageError)
-          // Continue anyway - storage might be disabled
-        }
+        // Clear any previous auth errors or state
+        sessionStorage.removeItem("authError")
+        localStorage.removeItem("supabase.auth.token")
+        localStorage.removeItem("supabase.auth.refreshToken")
       }
 
       // Use the Supabase callback URL directly instead of our custom one

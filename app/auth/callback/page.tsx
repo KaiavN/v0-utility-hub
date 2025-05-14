@@ -4,265 +4,101 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Loader2 } from "lucide-react"
 import { toast } from "@/components/ui/use-toast"
-import { getSupabaseClient } from "@/lib/supabase-client"
+import { createClient } from "@/utils/supabase/client"
 import { Button } from "@/components/ui/button"
 
 export default function AuthCallbackPage() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(true)
-  const [retryCount, setRetryCount] = useState(0)
   const [processingStage, setProcessingStage] = useState<string>("Initializing")
-  const supabase = getSupabaseClient()
+  const supabase = createClient()
 
-  // Update the handleAuth function to better handle code exchange
-  const handleAuth = async () => {
-    try {
-      console.log("Auth callback processing started")
-      setIsProcessing(true)
-      setProcessingStage("Checking URL parameters")
+  useEffect(() => {
+    const handleAuthCallback = async () => {
+      try {
+        setProcessingStage("Processing authentication")
+        console.log("Auth callback processing started")
 
-      // Check for error in URL
-      const url = new URL(window.location.href)
-      const errorParam = url.searchParams.get("error")
-      const errorDescription = url.searchParams.get("error_description")
-      const errorCode = url.searchParams.get("error_code")
+        // Check for error in URL
+        const url = new URL(window.location.href)
+        const errorParam = url.searchParams.get("error")
+        const errorDescription = url.searchParams.get("error_description")
 
-      if (errorParam) {
-        console.error("Auth callback error:", errorParam, errorDescription, errorCode)
-
-        // Special handling for bad_oauth_state error - try to continue anyway
-        if (errorCode === "bad_oauth_state") {
-          console.log("Detected bad_oauth_state error, attempting recovery")
-          setProcessingStage("Recovering from state error")
-
-          // Check if we have a session anyway (sometimes the session is created despite the state error)
-          const { data: sessionData } = await supabase.auth.getSession()
-
-          if (sessionData.session) {
-            console.log("Found valid session despite state error, proceeding with login")
-            // Get the redirect path from session storage or default to home
-            let redirectPath = "/"
-            try {
-              if (typeof window !== "undefined" && window.sessionStorage) {
-                redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
-                sessionStorage.removeItem("redirectAfterLogin")
-              }
-            } catch (storageError) {
-              console.warn("Error accessing sessionStorage:", storageError)
-              // Continue with default path
-            }
-
-            toast({
-              title: "Authentication Successful",
-              description: "You have been successfully authenticated",
-            })
-
-            // Redirect to the original page or home
-            router.push(redirectPath)
-            return
-          }
-
-          // If we don't have a session, try to sign in directly
-          router.push("/")
+        if (errorParam) {
+          console.error("Auth callback error:", errorParam, errorDescription)
+          setError(errorDescription || "Authentication failed")
+          toast({
+            title: "Authentication Failed",
+            description: errorDescription || "An error occurred during authentication",
+            variant: "destructive",
+          })
+          setIsProcessing(false)
           return
         }
 
-        setError(errorDescription || "Authentication failed")
-        toast({
-          title: "Authentication Failed",
-          description: errorDescription || "An error occurred during authentication",
-          variant: "destructive",
-        })
-        setIsProcessing(false)
-        return
-      }
+        // Get the session
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession()
 
-      // Handle hash fragment (GitHub often returns tokens this way)
-      if (window.location.hash) {
-        console.log("Processing hash fragment")
-        setProcessingStage("Processing hash fragment")
-
-        try {
-          // Try to exchange the hash for a session
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(window.location.hash)
-
-          if (exchangeError) {
-            console.error("Error exchanging hash for session:", exchangeError)
-            throw exchangeError
-          }
-        } catch (hashError) {
-          console.error("Error processing hash:", hashError)
-
-          // Let's try to get the session directly
-          const { data, error } = await supabase.auth.getSession()
-
-          if (error) {
-            console.error("Error getting session after hash processing:", error)
-            throw error
-          }
-
-          if (!data.session) {
-            console.error("No session found after hash processing")
-            throw new Error("No session found after hash processing")
-          }
+        if (sessionError) {
+          console.error("Error getting session:", sessionError)
+          throw sessionError
         }
-      }
 
-      // Handle code in query params (typical OAuth flow)
-      const code = url.searchParams.get("code")
-      if (code) {
-        console.log("Processing OAuth code:", code.substring(0, 10) + "...")
-        setProcessingStage("Exchanging OAuth code for session")
-
-        try {
-          // Add a longer delay before exchanging the code (helps with timing issues)
-          await new Promise((resolve) => setTimeout(resolve, 1000))
-
-          console.log("Calling exchangeCodeForSession...")
-          const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
-
-          if (exchangeError) {
-            console.error("Error exchanging code for session:", exchangeError)
-
-            // If this is a transient error, we might want to retry with increasing delays
-            if (
-              retryCount < 3 &&
-              (exchangeError.message.includes("Unable to exchange") ||
-                exchangeError.message.includes("network") ||
-                exchangeError.message.includes("timeout"))
-            ) {
-              setRetryCount((prev) => prev + 1)
-              console.log(`Retrying code exchange (attempt ${retryCount + 1})...`)
-              setProcessingStage(`Retrying code exchange (attempt ${retryCount + 1})`)
-
-              // Exponential backoff for retries
-              const delay = 1500 * Math.pow(2, retryCount)
-              await new Promise((resolve) => setTimeout(resolve, delay))
-              handleAuth()
-              return
-            }
-
-            throw exchangeError
-          }
-
-          console.log("Exchange successful, session:", exchangeData.session ? "exists" : "null")
-        } catch (codeError) {
-          console.error("Error processing OAuth code:", codeError)
-          setProcessingStage("Checking for session after error")
-
-          // Try to recover by checking if we have a session anyway
-          const { data: sessionData } = await supabase.auth.getSession()
-
-          if (!sessionData.session) {
-            // Try a direct sign-in as a last resort
-            console.log("No session found, attempting direct sign-in recovery...")
-            setProcessingStage("Attempting recovery")
-
-            try {
-              // Try to refresh the auth state
-              await supabase.auth.refreshSession()
-
-              // Add a delay before checking again
-              await new Promise((resolve) => setTimeout(resolve, 1000))
-
-              // Check again for a session
-              const { data: refreshedData } = await supabase.auth.getSession()
-
-              if (!refreshedData.session) {
-                throw codeError
-              }
-
-              console.log("Recovery successful, found session after refresh")
-            } catch (recoveryError) {
-              console.error("Recovery failed:", recoveryError)
-              throw codeError
-            }
-          } else {
-            console.log("Found session despite code exchange error, continuing...")
-          }
-        }
-      }
-
-      // Verify we have a session
-      setProcessingStage("Verifying session")
-      console.log("Verifying session...")
-
-      // Add a small delay before checking for session
-      await new Promise((resolve) => setTimeout(resolve, 500))
-
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-
-      if (sessionError) {
-        console.error("Error verifying session:", sessionError)
-        throw sessionError
-      }
-
-      if (!sessionData.session) {
-        console.error("No session found after authentication")
-
-        // One last attempt to get a session
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-        const { data: finalAttempt } = await supabase.auth.getSession()
-
-        if (!finalAttempt.session) {
+        if (!session) {
+          console.error("No session found after authentication")
           throw new Error("No session found after authentication")
         }
 
-        console.log("Session found on final attempt")
-      }
+        console.log("Authentication successful")
+        setProcessingStage("Authentication successful")
 
-      console.log("Session verified successfully")
-      setProcessingStage("Completing authentication")
-
-      // Get the redirect path from session storage or default to home
-      let redirectPath = "/"
-      try {
-        if (typeof window !== "undefined" && window.sessionStorage) {
-          redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
-          sessionStorage.removeItem("redirectAfterLogin")
+        // Get the redirect path from session storage or default to home
+        let redirectPath = "/"
+        try {
+          if (typeof window !== "undefined" && window.sessionStorage) {
+            redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
+            sessionStorage.removeItem("redirectAfterLogin")
+          }
+        } catch (storageError) {
+          console.warn("Error accessing sessionStorage:", storageError)
         }
-      } catch (storageError) {
-        console.warn("Error accessing sessionStorage:", storageError)
-        // Continue with default path
+
+        toast({
+          title: "Authentication Successful",
+          description: "You have been successfully authenticated",
+        })
+
+        // Redirect to the original page or home
+        router.push(redirectPath)
+      } catch (error) {
+        console.error("Auth callback unexpected error:", error)
+        setError("An error occurred during authentication. Please try again.")
+        toast({
+          title: "Authentication Failed",
+          description: "An error occurred during authentication",
+          variant: "destructive",
+        })
+        setIsProcessing(false)
       }
-
-      console.log("Authentication successful, redirecting to:", redirectPath)
-
-      toast({
-        title: "Authentication Successful",
-        description: "You have been successfully authenticated",
-      })
-
-      // Redirect to the original page or home
-      router.push(redirectPath)
-    } catch (error) {
-      console.error("Auth callback unexpected error:", error)
-      setError("An error occurred during authentication. Please try again.")
-      toast({
-        title: "Authentication Failed",
-        description: "An error occurred during authentication",
-        variant: "destructive",
-      })
-      setIsProcessing(false)
     }
-  }
 
-  // Update the useEffect to have a longer timeout
-  useEffect(() => {
-    handleAuth()
+    handleAuthCallback()
 
-    // Set a timeout to prevent infinite loading - increased to 30 seconds
+    // Set a timeout to prevent infinite loading
     const timeoutId = setTimeout(() => {
       if (isProcessing) {
         console.log("Auth callback timeout reached")
         setIsProcessing(false)
-        setError(`Authentication is taking longer than expected (stuck at: ${processingStage}). Please try again.`)
+        setError(`Authentication is taking longer than expected. Please try again.`)
       }
-    }, 30000) // 30 second timeout (increased from 20)
+    }, 15000) // 15 second timeout
 
     return () => clearTimeout(timeoutId)
-  }, [router, retryCount])
+  }, [router])
 
   if (error) {
     return (
@@ -273,19 +109,6 @@ export default function AuthCallbackPage() {
           <div className="flex flex-col space-y-2">
             <Button onClick={() => router.push("/")} className="w-full">
               Return to Home
-            </Button>
-            <Button
-              onClick={() => {
-                setError(null)
-                setIsProcessing(true)
-                setRetryCount(0)
-                setProcessingStage("Initializing")
-                handleAuth()
-              }}
-              variant="outline"
-              className="w-full"
-            >
-              Try Again
             </Button>
           </div>
         </div>
@@ -299,7 +122,6 @@ export default function AuthCallbackPage() {
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
         <h1 className="text-xl font-semibold">Completing authentication...</h1>
         <p className="text-muted-foreground">{processingStage}</p>
-        {retryCount > 0 && <p className="text-sm text-muted-foreground">Retrying... (Attempt {retryCount})</p>}
       </div>
     </div>
   )

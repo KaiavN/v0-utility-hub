@@ -27,19 +27,12 @@ async function getSupabaseConfig() {
   // Client-side: Try to fetch from API if needed
   try {
     // Check localStorage first for faster startup
-    try {
-      if (typeof window !== "undefined" && window.localStorage) {
-        const cachedConfig = localStorage.getItem("supabaseConfig")
-        if (cachedConfig) {
-          const parsed = JSON.parse(cachedConfig)
-          if (parsed.url && parsed.anonKey) {
-            return parsed
-          }
-        }
+    const cachedConfig = localStorage.getItem("supabaseConfig")
+    if (cachedConfig) {
+      const parsed = JSON.parse(cachedConfig)
+      if (parsed.url && parsed.anonKey) {
+        return parsed
       }
-    } catch (storageError) {
-      console.warn("Error accessing localStorage:", storageError)
-      // Continue with API fetch
     }
 
     // Fetch from API
@@ -54,14 +47,7 @@ async function getSupabaseConfig() {
     }
 
     // Cache for next time
-    try {
-      if (typeof window !== "undefined" && window.localStorage) {
-        localStorage.setItem("supabaseConfig", JSON.stringify(config))
-      }
-    } catch (storageError) {
-      console.warn("Error caching Supabase config:", storageError)
-      // Continue without caching
-    }
+    localStorage.setItem("supabaseConfig", JSON.stringify(config))
     return config
   } catch (error) {
     console.error("Error fetching Supabase config:", error)
@@ -134,26 +120,22 @@ export function createSupabaseClient() {
   }
 
   // If we don't have the instance yet, try to use cached config
-  if (typeof window !== "undefined") {
-    try {
-      if (window.localStorage) {
-        const cachedConfig = localStorage.getItem("supabaseConfig")
-        if (cachedConfig) {
-          const config = JSON.parse(cachedConfig)
-          if (config.url && config.anonKey) {
-            supabaseInstance = createClient(config.url, config.anonKey, {
-              auth: {
-                persistSession: true,
-                autoRefreshToken: true,
-              },
-            })
-            return supabaseInstance
-          }
-        }
+  try {
+    const cachedConfig = localStorage.getItem("supabaseConfig")
+    if (cachedConfig) {
+      const config = JSON.parse(cachedConfig)
+      if (config.url && config.anonKey) {
+        supabaseInstance = createClient(config.url, config.anonKey, {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+          },
+        })
+        return supabaseInstance
       }
-    } catch (e) {
-      console.error("Error using cached config:", e)
     }
+  } catch (e) {
+    console.error("Error using cached config:", e)
   }
 
   // If we don't have the config yet, start fetching it
