@@ -42,8 +42,16 @@ export default function AuthCallbackPage() {
           if (sessionData.session) {
             console.log("Found valid session despite state error, proceeding with login")
             // Get the redirect path from session storage or default to home
-            const redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
-            sessionStorage.removeItem("redirectAfterLogin")
+            let redirectPath = "/"
+            try {
+              if (typeof window !== "undefined" && window.sessionStorage) {
+                redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
+                sessionStorage.removeItem("redirectAfterLogin")
+              }
+            } catch (storageError) {
+              console.warn("Error accessing sessionStorage:", storageError)
+              // Continue with default path
+            }
 
             toast({
               title: "Authentication Successful",
@@ -208,8 +216,16 @@ export default function AuthCallbackPage() {
       setProcessingStage("Completing authentication")
 
       // Get the redirect path from session storage or default to home
-      const redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
-      sessionStorage.removeItem("redirectAfterLogin")
+      let redirectPath = "/"
+      try {
+        if (typeof window !== "undefined" && window.sessionStorage) {
+          redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
+          sessionStorage.removeItem("redirectAfterLogin")
+        }
+      } catch (storageError) {
+        console.warn("Error accessing sessionStorage:", storageError)
+        // Continue with default path
+      }
 
       console.log("Authentication successful, redirecting to:", redirectPath)
 

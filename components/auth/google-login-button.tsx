@@ -4,7 +4,6 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/auth-context"
 import { toast } from "@/components/ui/use-toast"
-import { initiateGoogleAuth } from "@/lib/google-auth"
 
 interface GoogleLoginButtonProps {
   className?: string
@@ -13,9 +12,10 @@ interface GoogleLoginButtonProps {
 }
 
 export function GoogleLoginButton({ className = "", variant = "default", size = "default" }: GoogleLoginButtonProps) {
-  const { isLoading } = useAuth()
+  const { loginWithGoogle, isLoading } = useAuth()
   const [isClicked, setIsClicked] = useState(false)
 
+  // Update the handleLogin function to be more robust
   const handleLogin = async () => {
     if (isLoading || isClicked) return
 
@@ -25,7 +25,9 @@ export function GoogleLoginButton({ className = "", variant = "default", size = 
 
       // Clear any existing auth data before starting a new flow
       if (typeof window !== "undefined") {
+        // Clear more potential conflicting state
         sessionStorage.removeItem("oauthState")
+        sessionStorage.removeItem("supabase.auth.token")
         localStorage.removeItem("supabase.auth.token")
         localStorage.removeItem("supabase.auth.refreshToken")
       }
@@ -33,14 +35,13 @@ export function GoogleLoginButton({ className = "", variant = "default", size = 
       // Store current timestamp to help with debugging
       sessionStorage.setItem("googleAuthStarted", new Date().toISOString())
 
-      // Store the current path for redirect after login
-      sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
-
-      // Get the Google auth URL and redirect
-      const authUrl = await initiateGoogleAuth()
-      window.location.href = authUrl
+      await loginWithGoogle()
 
       // We don't reset isClicked here because we'll be redirected to Google
+      // If we're still here after 5 seconds, something went wrong
+      setTimeout(() => {
+        setIsClicked(false)
+      }, 5000)
     } catch (error) {
       console.error("Error in Google login button:", error)
       toast({
