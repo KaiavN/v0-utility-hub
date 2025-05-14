@@ -249,83 +249,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Update the loginWithGoogle function to be more reliable
+  // Remove the loginWithGoogle function and replace it with this stub
+  // since we're now handling Google auth directly in the GoogleLoginButton component
+
   const loginWithGoogle = async (): Promise<void> => {
-    try {
-      setIsLoading(true)
-
-      // Store the current path to redirect back after login
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
-
-        // Clear any previous auth errors or state
-        sessionStorage.removeItem("authError")
-        localStorage.removeItem("supabase.auth.token")
-        localStorage.removeItem("supabase.auth.refreshToken")
-      }
-
-      // Use the Supabase callback URL directly instead of our custom one
-      const redirectUrl = "https://hguhugnlvlmvtrduwiyn.supabase.co/auth/v1/callback"
-      console.log("Logging in with Google, redirect URL:", redirectUrl)
-
-      // First, try to sign out to ensure a clean authentication state
-      try {
-        await supabase.auth.signOut({ scope: "local" })
-        console.log("Signed out before Google login")
-      } catch (signOutError) {
-        console.warn("Error signing out before Google login:", signOutError)
-        // Continue anyway
-      }
-
-      // Add a small delay to ensure signOut completes
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Use the Supabase callback URL
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: redirectUrl,
-          scopes: "email profile",
-          queryParams: {
-            access_type: "offline",
-            prompt: "consent select_account", // Force consent screen to appear
-          },
-        },
-      })
-
-      if (error) {
-        console.error("Google login error:", error)
-        toast({
-          title: "Login Failed",
-          description: error.message || "Failed to login with Google",
-          variant: "destructive",
-        })
-        setIsLoading(false)
-        return
-      }
-
-      // If we have a URL, redirect to it
-      if (data?.url) {
-        console.log("Redirecting to Google OAuth URL:", data.url)
-        window.location.href = data.url
-      } else {
-        console.error("No redirect URL returned from signInWithOAuth")
-        toast({
-          title: "Login Failed",
-          description: "Failed to initiate Google login",
-          variant: "destructive",
-        })
-        setIsLoading(false)
-      }
-    } catch (error) {
-      console.error("Google login unexpected error:", error)
-      toast({
-        title: "Login Failed",
-        description: "An unexpected error occurred",
-        variant: "destructive",
-      })
-      setIsLoading(false)
-    }
+    // This is now handled directly in the GoogleLoginButton component
+    console.log("Google login is now handled directly in the GoogleLoginButton component")
   }
 
   // Improved logout function
