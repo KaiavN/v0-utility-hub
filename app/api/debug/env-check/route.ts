@@ -1,35 +1,35 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseEnvStatus, getAuthEnvStatus, getUrlEnvStatus } from "@/lib/env-debug"
 
-export async function GET() {
-  // Only enable this endpoint in development or when explicitly allowed
+export async function GET(request: NextRequest) {
+  // Only allow this endpoint in development or if explicitly enabled
   if (process.env.NODE_ENV !== "development" && process.env.ENABLE_ENV_DEBUG !== "true") {
-    return NextResponse.json({ error: "This endpoint is only available in development mode" }, { status: 403 })
+    return NextResponse.json(
+      { error: "This endpoint is only available in development mode or with ENABLE_ENV_DEBUG=true" },
+      { status: 403 },
+    )
   }
 
-  // Get environment variable status
+  // Check all environment variables
   const supabaseVars = getSupabaseEnvStatus()
   const authVars = getAuthEnvStatus()
   const urlVars = getUrlEnvStatus()
 
-  // Convert to a simple exists/doesn't exist format for the response
-  // to avoid exposing actual values
+  // Combine all environment variable statuses
   const variables: Record<string, boolean> = {}
 
-  // Process Supabase variables
-  Object.entries(supabaseVars).forEach(([key, status]) => {
+  // Add all variable statuses (just existence, not the values for security)
+  Object.entries({
+    ...supabaseVars,
+    ...authVars,
+    ...urlVars,
+  }).forEach(([key, status]) => {
     variables[key] = status.exists
   })
 
-  // Process Auth variables
-  Object.entries(authVars).forEach(([key, status]) => {
-    variables[key] = status.exists
+  // Return the environment variable statuses
+  return NextResponse.json({
+    variables,
+    timestamp: new Date().toISOString(),
   })
-
-  // Process URL variables
-  Object.entries(urlVars).forEach(([key, status]) => {
-    variables[key] = status.exists
-  })
-
-  return NextResponse.json({ variables })
 }

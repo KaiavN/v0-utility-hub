@@ -1,106 +1,86 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { Loader2 } from "lucide-react"
+import { Loader2, AlertCircle } from "lucide-react"
 import { useState, useEffect } from "react"
-import { createClient } from "@/utils/supabase/client"
 import { toast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
+import { signInWithGoogle, isAuthReady } from "@/lib/supabase-auth"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface GoogleLoginButtonProps {
   className?: string
   variant?: "default" | "outline" | "secondary" | "ghost" | "link" | "destructive"
   size?: "default" | "sm" | "lg" | "icon"
+  fullWidth?: boolean
+  showErrors?: boolean
 }
 
-export function GoogleLoginButton({ className = "", variant = "default", size = "default" }: GoogleLoginButtonProps) {
+export function GoogleLoginButton({
+  className = "",
+  variant = "default",
+  size = "default",
+  fullWidth = false,
+  showErrors = true,
+}: GoogleLoginButtonProps) {
   const [isLoading, setIsLoading] = useState(false)
-  const [isClientReady, setIsClientReady] = useState(false)
+  const [isReady, setIsReady] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
-  const [supabase, setSupabase] = useState<any>(null)
-  const [googleClientId, setGoogleClientId] = useState<string | null>(null)
 
+  // Check if auth system is ready
   useEffect(() => {
-    // Check if Google Client ID is available
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
-    setGoogleClientId(clientId || null)
+    setIsReady(isAuthReady())
 
-    if (!clientId) {
-      console.error("NEXT_PUBLIC_GOOGLE_CLIENT_ID is not set")
+    // Store the current path to redirect back after login
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
+      } catch (storageError) {
+        console.warn("Error storing redirect path:", storageError)
+      }
     }
-
-    // Initialize Supabase client after component mounts to avoid SSR issues
-    setSupabase(createClient())
-    setIsClientReady(true)
   }, [])
 
   const handleLogin = async () => {
-    if (isLoading || !isClientReady || !supabase) return
+    if (isLoading || !isReady) return
+
+    setIsLoading(true)
+    setError(null)
 
     try {
-      setIsLoading(true)
       console.log("Google login button clicked")
+      await signInWithGoogle()
 
-      // Store the current path to redirect back after login
-      if (typeof window !== "undefined") {
-        try {
-          sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
-        } catch (storageError) {
-          console.warn("Error storing redirect path:", storageError)
-        }
-      }
-
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          queryParams: {
-            access_type: "offline",
-            prompt: "consent",
-          },
-        },
-      })
-
-      if (error) {
-        console.error("Google login error:", error)
-        toast({
-          title: "Login Failed",
-          description: error.message || "Failed to login with Google",
-          variant: "destructive",
-        })
-        setIsLoading(false)
-        return
-      }
-
-      if (data?.url) {
-        window.location.href = data.url
-      } else {
-        setIsLoading(false)
-        toast({
-          title: "Login Failed",
-          description: "Failed to initiate Google login",
-          variant: "destructive",
-        })
-      }
+      // If we reach here, it means we're waiting for redirect
+      // The actual sign-in completion happens in the callback page
     } catch (error) {
-      console.error("Google login unexpected error:", error)
+      console.error("Google login error:", error)
+
+      const errorMessage = error instanceof Error ? error.message : "Failed to initiate Google login"
+
+      setError(errorMessage)
+
       toast({
         title: "Login Failed",
-        description: "An unexpected error occurred",
+        description: errorMessage,
         variant: "destructive",
       })
+
       setIsLoading(false)
     }
   }
 
+  const widthClass = fullWidth ? "w-full" : ""
+
   return (
-    <>
+    <div className={fullWidth ? "w-full" : ""}>
       <Button
         variant={variant}
         size={size}
-        className={`flex items-center gap-2 ${className}`}
+        className={`flex items-center gap-2 ${widthClass} ${className}`}
         onClick={handleLogin}
-        disabled={isLoading || !isClientReady}
+        disabled={isLoading || !isReady}
       >
         {isLoading ? (
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -124,9 +104,12 @@ export function GoogleLoginButton({ className = "", variant = "default", size = 
         {isLoading ? "Connecting..." : "Sign in with Google"}
       </Button>
 
-      {!googleClientId && !isLoading && (
-        <div className="text-xs text-red-500 mt-1">Warning: Google Client ID not configured</div>
+      {showErrors && error && (
+        <Alert variant="destructive" className="mt-2">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
-    </>
+    </div>
   )
 }
