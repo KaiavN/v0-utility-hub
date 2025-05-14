@@ -264,8 +264,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem("supabase.auth.refreshToken")
       }
 
-      const siteUrl = getSiteUrl()
-      console.log("Logging in with Google, redirect URL:", `${siteUrl}/auth/callback`)
+      // Use the Supabase callback URL directly instead of our custom one
+      const redirectUrl = "https://hguhugnlvlmvtrduwiyn.supabase.co/auth/v1/callback"
+      console.log("Logging in with Google, redirect URL:", redirectUrl)
 
       // First, try to sign out to ensure a clean authentication state
       try {
@@ -279,11 +280,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Add a small delay to ensure signOut completes
       await new Promise((resolve) => setTimeout(resolve, 300))
 
-      // Use a direct URL approach for more reliability
+      // Use the Supabase callback URL
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${siteUrl}/auth/callback`,
+          redirectTo: redirectUrl,
           scopes: "email profile",
           queryParams: {
             access_type: "offline",
