@@ -249,7 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Google authentication function - improved for reliability
+  // Update the loginWithGoogle function to be more reliable
   const loginWithGoogle = async (): Promise<void> => {
     try {
       setIsLoading(true)
@@ -261,6 +261,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Clear any previous auth errors or state
         sessionStorage.removeItem("authError")
         localStorage.removeItem("supabase.auth.token")
+        localStorage.removeItem("supabase.auth.refreshToken")
       }
 
       const siteUrl = getSiteUrl()
@@ -275,6 +276,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Continue anyway
       }
 
+      // Add a small delay to ensure signOut completes
+      await new Promise((resolve) => setTimeout(resolve, 300))
+
       // Use a direct URL approach for more reliability
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
@@ -283,7 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           scopes: "email profile",
           queryParams: {
             access_type: "offline",
-            prompt: "select_account",
+            prompt: "consent select_account", // Force consent screen to appear
           },
         },
       })

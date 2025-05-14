@@ -15,6 +15,7 @@ export default function AuthCallbackPage() {
   const [processingStage, setProcessingStage] = useState<string>("Initializing")
   const supabase = getSupabaseClient()
 
+  // Update the handleAuth function to better handle code exchange
   const handleAuth = async () => {
     try {
       console.log("Auth callback processing started")
@@ -107,8 +108,8 @@ export default function AuthCallbackPage() {
         setProcessingStage("Exchanging OAuth code for session")
 
         try {
-          // Add a small delay before exchanging the code (helps with timing issues)
-          await new Promise((resolve) => setTimeout(resolve, 500))
+          // Add a longer delay before exchanging the code (helps with timing issues)
+          await new Promise((resolve) => setTimeout(resolve, 1000))
 
           console.log("Calling exchangeCodeForSession...")
           const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
@@ -116,7 +117,7 @@ export default function AuthCallbackPage() {
           if (exchangeError) {
             console.error("Error exchanging code for session:", exchangeError)
 
-            // If this is a transient error, we might want to retry
+            // If this is a transient error, we might want to retry with increasing delays
             if (
               retryCount < 3 &&
               (exchangeError.message.includes("Unable to exchange") ||
@@ -127,8 +128,9 @@ export default function AuthCallbackPage() {
               console.log(`Retrying code exchange (attempt ${retryCount + 1})...`)
               setProcessingStage(`Retrying code exchange (attempt ${retryCount + 1})`)
 
-              // Wait a bit longer before retrying
-              await new Promise((resolve) => setTimeout(resolve, 1500))
+              // Exponential backoff for retries
+              const delay = 1500 * Math.pow(2, retryCount)
+              await new Promise((resolve) => setTimeout(resolve, delay))
               handleAuth()
               return
             }
@@ -153,6 +155,9 @@ export default function AuthCallbackPage() {
               // Try to refresh the auth state
               await supabase.auth.refreshSession()
 
+              // Add a delay before checking again
+              await new Promise((resolve) => setTimeout(resolve, 1000))
+
               // Check again for a session
               const { data: refreshedData } = await supabase.auth.getSession()
 
@@ -174,6 +179,10 @@ export default function AuthCallbackPage() {
       // Verify we have a session
       setProcessingStage("Verifying session")
       console.log("Verifying session...")
+
+      // Add a small delay before checking for session
+      await new Promise((resolve) => setTimeout(resolve, 500))
+
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
 
       if (sessionError) {
@@ -183,7 +192,16 @@ export default function AuthCallbackPage() {
 
       if (!sessionData.session) {
         console.error("No session found after authentication")
-        throw new Error("No session found after authentication")
+
+        // One last attempt to get a session
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        const { data: finalAttempt } = await supabase.auth.getSession()
+
+        if (!finalAttempt.session) {
+          throw new Error("No session found after authentication")
+        }
+
+        console.log("Session found on final attempt")
       }
 
       console.log("Session verified successfully")
@@ -214,17 +232,18 @@ export default function AuthCallbackPage() {
     }
   }
 
+  // Update the useEffect to have a longer timeout
   useEffect(() => {
     handleAuth()
 
-    // Set a timeout to prevent infinite loading - increased to 20 seconds
+    // Set a timeout to prevent infinite loading - increased to 30 seconds
     const timeoutId = setTimeout(() => {
       if (isProcessing) {
         console.log("Auth callback timeout reached")
         setIsProcessing(false)
         setError(`Authentication is taking longer than expected (stuck at: ${processingStage}). Please try again.`)
       }
-    }, 20000) // 20 second timeout (increased from 10)
+    }, 30000) // 30 second timeout (increased from 20)
 
     return () => clearTimeout(timeoutId)
   }, [router, retryCount])

@@ -15,6 +15,7 @@ export function GoogleLoginButton({ className = "", variant = "default", size = 
   const { loginWithGoogle, isLoading } = useAuth()
   const [isClicked, setIsClicked] = useState(false)
 
+  // Update the handleLogin function to be more robust
   const handleLogin = async () => {
     if (isLoading || isClicked) return
 
@@ -24,9 +25,15 @@ export function GoogleLoginButton({ className = "", variant = "default", size = 
 
       // Clear any existing auth data before starting a new flow
       if (typeof window !== "undefined") {
+        // Clear more potential conflicting state
         sessionStorage.removeItem("oauthState")
+        sessionStorage.removeItem("supabase.auth.token")
         localStorage.removeItem("supabase.auth.token")
+        localStorage.removeItem("supabase.auth.refreshToken")
       }
+
+      // Store current timestamp to help with debugging
+      sessionStorage.setItem("googleAuthStarted", new Date().toISOString())
 
       await loginWithGoogle()
 
