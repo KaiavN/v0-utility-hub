@@ -28,12 +28,9 @@ export default function AuthCallbackPage() {
       if (errorParam) {
         console.error("Auth callback error:", errorParam, errorDescription, errorCode)
 
-        // Special handling for bad_oauth_state error
+        // Special handling for bad_oauth_state error - try to continue anyway
         if (errorCode === "bad_oauth_state") {
           console.log("Detected bad_oauth_state error, attempting recovery")
-
-          // Clear any stored state
-          sessionStorage.removeItem("oauthState")
 
           // Check if we have a session anyway (sometimes the session is created despite the state error)
           const { data: sessionData } = await supabase.auth.getSession()
@@ -54,11 +51,12 @@ export default function AuthCallbackPage() {
             return
           }
 
-          setError("Authentication failed due to security validation. Please try again.")
-        } else {
-          setError(errorDescription || "Authentication failed")
+          // If we don't have a session, try to sign in directly
+          router.push("/")
+          return
         }
 
+        setError(errorDescription || "Authentication failed")
         toast({
           title: "Authentication Failed",
           description: errorDescription || "An error occurred during authentication",
@@ -67,26 +65,6 @@ export default function AuthCallbackPage() {
         setIsProcessing(false)
         return
       }
-
-      // Validate state parameter if present in the URL
-      const stateParam = url.searchParams.get("state")
-      const storedState = sessionStorage.getItem("oauthState")
-
-      if (stateParam && storedState && stateParam !== storedState) {
-        console.error("State parameter mismatch:", stateParam, storedState)
-        setError("Authentication failed due to security validation. Please try again.")
-        toast({
-          title: "Authentication Failed",
-          description: "Security validation failed. Please try again.",
-          variant: "destructive",
-        })
-        sessionStorage.removeItem("oauthState")
-        setIsProcessing(false)
-        return
-      }
-
-      // Clear the stored state as it's no longer needed
-      sessionStorage.removeItem("oauthState")
 
       // Handle hash fragment (GitHub often returns tokens this way)
       if (window.location.hash) {

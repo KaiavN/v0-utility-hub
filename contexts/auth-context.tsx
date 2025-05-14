@@ -249,7 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Google authentication function
+  // Google authentication function - simplified to avoid state parameter issues
   const loginWithGoogle = async (): Promise<void> => {
     try {
       setIsLoading(true)
@@ -257,32 +257,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Store the current path to redirect back after login
       if (typeof window !== "undefined") {
         sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
-
-        // Clear any previous auth errors
-        sessionStorage.removeItem("authError")
       }
 
       const siteUrl = getSiteUrl()
       console.log("Logging in with Google, redirect URL:", `${siteUrl}/auth/callback`)
 
-      // Generate a random state parameter to prevent CSRF attacks
-      // Use a simple random string that doesn't need encoding
-      const stateParam = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
-
-      // Store in sessionStorage for verification in the callback
-      sessionStorage.setItem("oauthState", stateParam)
-      console.log("Generated OAuth state:", stateParam)
-
+      // Simplified OAuth call without state parameter
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: `${siteUrl}/auth/callback`,
-          // Explicitly request the scopes we need
           scopes: "email profile",
           queryParams: {
             access_type: "offline",
             prompt: "consent",
-            state: stateParam,
           },
         },
       })

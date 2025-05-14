@@ -280,12 +280,14 @@ export default function FlashcardsPage() {
     setShuffledFlashcards(shuffled)
     setIsShuffled(true)
     setCurrentCardIndex(0)
+    setIsFlipped(false)
   }
 
   // Reset shuffle
   const resetShuffle = () => {
     setIsShuffled(false)
     setCurrentCardIndex(0)
+    setIsFlipped(false)
   }
 
   // Get the current flashcard
@@ -298,14 +300,14 @@ export default function FlashcardsPage() {
   const nextCard = () => {
     const cards = isShuffled ? shuffledFlashcards : getFlashcardsForSelectedDeck()
     setCurrentCardIndex((prev) => (prev + 1) % cards.length)
-    setShowAnswer(false)
+    setIsFlipped(false)
   }
 
   // Go to the previous flashcard
   const prevCard = () => {
     const cards = isShuffled ? shuffledFlashcards : getFlashcardsForSelectedDeck()
     setCurrentCardIndex((prev) => (prev - 1 + cards.length) % cards.length)
-    setShowAnswer(false)
+    setIsFlipped(false)
   }
 
   // Get the current deck
@@ -567,13 +569,17 @@ export default function FlashcardsPage() {
                       <div className="absolute top-2 right-2 text-sm text-muted-foreground">
                         {currentCardIndex + 1} / {getFlashcardsForSelectedDeck().length}
                       </div>
-                      <div
-                        className={`flip-card min-h-[200px] flex items-center justify-center rounded-md border p-4 text-center cursor-pointer ${isFlipped ? "flipped" : ""}`}
-                        onClick={toggleFlipped}
-                      >
-                        <div className="flip-card-inner">
-                          <div className="flip-card-front">{getCurrentFlashcard()?.front}</div>
-                          <div className="flip-card-back">{getCurrentFlashcard()?.back}</div>
+                      <div className="flashcard-container min-h-[200px] perspective-1000">
+                        <div
+                          className={`flashcard cursor-pointer ${isFlipped ? "flipped" : ""}`}
+                          onClick={toggleFlipped}
+                        >
+                          <div className="flashcard-front flex items-center justify-center rounded-md border p-4 text-center">
+                            {getCurrentFlashcard()?.front}
+                          </div>
+                          <div className="flashcard-back flex items-center justify-center rounded-md border p-4 text-center">
+                            {getCurrentFlashcard()?.back}
+                          </div>
                         </div>
                       </div>
                       <div className="flex justify-between mt-4">
@@ -590,7 +596,7 @@ export default function FlashcardsPage() {
               </Card>
             </>
           ) : (
-            <Card className="h-full transition-transform duration-300 transform-style-preserve-3d">
+            <Card className="h-full">
               <CardContent className="flex flex-col items-center justify-center">
                 <h3 className="text-lg font-medium">Select a Deck</h3>
                 <p className="text-sm text-muted-foreground">Choose a deck to view flashcards</p>
@@ -671,6 +677,43 @@ export default function FlashcardsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <style jsx global>{`
+        .flashcard-container {
+          perspective: 1000px;
+          width: 100%;
+          height: 200px;
+        }
+        
+        .flashcard {
+          width: 100%;
+          height: 100%;
+          position: relative;
+          transform-style: preserve-3d;
+          transition: transform 0.6s;
+        }
+        
+        .flashcard.flipped {
+          transform: rotateY(180deg);
+        }
+        
+        .flashcard-front,
+        .flashcard-back {
+          position: absolute;
+          width: 100%;
+          height: 100%;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 1rem;
+        }
+        
+        .flashcard-back {
+          transform: rotateY(180deg);
+        }
+      `}</style>
     </div>
   )
 }
