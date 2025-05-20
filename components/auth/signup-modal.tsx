@@ -48,19 +48,29 @@ export function SignupModal({ open, onOpenChange, onSwitchToLogin, onSignupSucce
     e.preventDefault()
     setError("")
 
-    // Basic validation
-    if (!email || !password) {
-      setError("Email and password are required")
+    // Enhanced validation
+    if (!email || !email.trim()) {
+      setError("Email is required")
       return
     }
 
-    if (password !== confirmPassword) {
-      setError("Passwords do not match")
+    if (!email.includes("@") || !email.includes(".")) {
+      setError("Please enter a valid email address")
+      return
+    }
+
+    if (!password) {
+      setError("Password is required")
       return
     }
 
     if (password.length < 6) {
       setError("Password must be at least 6 characters")
+      return
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match")
       return
     }
 
@@ -82,7 +92,15 @@ export function SignupModal({ open, onOpenChange, onSwitchToLogin, onSignupSucce
       }
     } catch (error: any) {
       console.error("Signup error:", error)
-      setError(error?.message || "An error occurred during signup")
+
+      // Provide more specific error messages based on the error
+      if (error?.message?.includes("already") || error?.message?.includes("exists")) {
+        setError("An account with this email already exists")
+      } else if (error?.message?.includes("network")) {
+        setError("Network error. Please check your connection and try again.")
+      } else {
+        setError(error?.message || "An error occurred during signup")
+      }
     } finally {
       setIsLoading(false)
     }

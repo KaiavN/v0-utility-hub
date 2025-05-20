@@ -1193,130 +1193,163 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return
 
-    const subscription = supabase
-      .channel("messages-channel")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-        },
-        async (payload) => {
-          const newMessage = payload.new as any
+    let subscription
+    try {
+      subscription = supabase
+        .channel("messages-channel")
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "messages",
+          },
+          async (payload) => {
+            const newMessage = payload.new as any
 
-          // Skip messages from blocked users
-          if (state.blockedUsers.includes(newMessage.sender_id)) {
-            return
-          }
-
-          // Fetch the sender info
-          const { data: sender } = await supabase
-            .from("profiles")
-            .select("display_name, avatar_url")
-            .eq("id", newMessage.sender_id)
-            .single()
-
-          const formattedMessage: Message = {
-            id: newMessage.id,
-            content: newMessage.content,
-            created_at: newMessage.created_at,
-            read: newMessage.read,
-            sender_id: newMessage.sender_id,
-            conversation_id: newMessage.conversation_id,
-            sender_name: sender?.display_name || "Unknown",
-            sender_avatar: sender?.avatar_url || null,
-          }
-
-          // Add message to state if it's for the current conversation
-          dispatch({ type: "ADD_MESSAGE", payload: formattedMessage })
-
-          // Mark as read if it's the active conversation and not from the current user
-          if (state.activeConversation === newMessage.conversation_id && newMessage.sender_id !== user.id) {
-            markMessagesAsRead(newMessage.conversation_id)
-          }
-
-          // Refresh conversations to update the list
-          refreshConversationsRef.current()
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "typing_status",
-        },
-        async (payload) => {
-          const typingStatus = payload.new as any
-
-          // Only update typing status if it's not the current user
-          if (typingStatus.user_id !== user.id) {
-            dispatch({
-              type: "SET_TYPING",
-              payload: {
-                conversationId: typingStatus.conversation_id,
-                isTyping: typingStatus.is_typing,
-              },
-            })
-          }
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "blocked_users",
-        },
-        async (payload) => {
-          if (payload.new.blocker_id === user.id || payload.new.blocked_id === user.id) {
-            await fetchBlockedUsers()
-            await refreshConversationsRef.current()
-          }
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "blocked_users",
-        },
-        async (payload) => {
-          if (payload.old.blocker_id === user.id || payload.old.blocked_id === user.id) {
-            await fetchBlockedUsers()
-            await refreshConversationsRef.current()
-          }
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "conversation_members",
-        },
-        async (payload) => {
-          // Refresh conversations if there's any change to conversation members
-          await refreshConversationsRef.current()
-
-          // If this is the active conversation, refresh group members
-          if (
-            state.activeConversation === payload.new?.conversation_id ||
-            state.activeConversation === payload.old?.conversation_id
-          ) {
-            const conversationId = state.activeConversation
-            if (conversationId) {
-              await getGroupMembers(conversationId)
+            // Skip messages from blocked users
+            if (state.blockedUsers.includes(newMessage.sender_id)) {
+              return
             }
+
+            // Fetch the sender info
+            const { data: sender } = await supabase
+              .from("profiles")
+              .select("display_name, avatar_url")
+              .eq("id", newMessage.sender_id)
+              .single()
+
+            const formattedMessage: Message = {
+              id: newMessage.id,
+              content: newMessage.content,
+              created_at: newMessage.created_at,
+              read: newMessage.read,
+              sender_id: newMessage.sender_id,
+              conversation_id: newMessage.conversation_id,
+              sender_name: sender?.display_name || "Unknown",
+              sender_avatar: sender?.avatar_url || null,
+            }
+
+            // Add message to state if it's for the current conversation
+            dispatch({ type: "ADD_MESSAGE", payload: formattedMessage })
+
+            // Mark as read if it's the active conversation and not from the current user
+            if (state.activeConversation === newMessage.conversation_id && newMessage.sender_id !== user.id) {
+              markMessagesAsRead(newMessage.conversation_id)
+            }
+
+            // Refresh conversations to update the list
+            refreshConversationsRef.current()
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "typing_status",
+          },
+          async (payload) => {
+            const typingStatus = payload.new as any
+
+            // Only update typing status if it's not the current user
+            if (typingStatus.user_id !== user.id) {
+              dispatch({
+                type: "SET_TYPING",
+                payload: {
+                  conversationId: typingStatus.conversation_id,
+                  isTyping: typingStatus.is_typing,
+                },
+              })
+            }
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "blocked_users",
+          },
+          async (payload) => {
+            if (payload.new.blocker_id === user.id || payload.new.blocked_id === user.id) {
+              await fetchBlockedUsers()
+              await refreshConversationsRef.current()
+            }
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "DELETE",
+            schema: "public",
+            table: "blocked_users",
+          },
+          async (payload) => {
+            if (payload.old.blocker_id === user.id || payload.old.blocked_id === user.id) {
+              await fetchBlockedUsers()
+              await refreshConversationsRef.current()
+            }
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "conversation_members",
+          },
+          async (payload) => {
+            // Refresh conversations if there's any change to conversation members
+            await refreshConversationsRef.current()
+
+            // If this is the active conversation, refresh group members
+            if (
+              state.activeConversation === payload.new?.conversation_id ||
+              state.activeConversation === payload.old?.conversation_id
+            ) {
+              const conversationId = state.activeConversation
+              if (conversationId) {
+                await getGroupMembers(conversationId)
+              }
+            }
+          },
+        )
+        .subscribe((status) => {
+          if (status === "CHANNEL_ERROR") {
+            console.warn("Supabase realtime channel error. Falling back to polling.")
+            // Set up polling as fallback
+            const pollingInterval = setInterval(() => {
+              if (state.activeConversation) {
+                fetchMessages(state.activeConversation)
+              }
+              refreshConversationsRef.current()
+            }, 10000) // Poll every 10 seconds
+
+            return () => clearInterval(pollingInterval)
           }
-        },
-      )
-      .subscribe()
+        })
+    } catch (error) {
+      console.error("Error setting up realtime subscription:", error)
+      // Set up polling as fallback
+      const pollingInterval = setInterval(() => {
+        if (state.activeConversation) {
+          fetchMessages(state.activeConversation)
+        }
+        refreshConversationsRef.current()
+      }, 10000) // Poll every 10 seconds
+
+      return () => clearInterval(pollingInterval)
+    }
 
     return () => {
-      supabase.removeChannel(subscription)
+      if (subscription) {
+        try {
+          supabase.removeChannel(subscription)
+        } catch (error) {
+          console.error("Error removing channel:", error)
+        }
+      }
     }
   }, [
     isAuthenticated,
@@ -1327,6 +1360,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     markMessagesAsRead,
     fetchBlockedUsers,
     getGroupMembers,
+    fetchMessages,
   ])
 
   // Load conversations on initial mount

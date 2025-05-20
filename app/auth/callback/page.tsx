@@ -15,7 +15,7 @@ export default function AuthCallbackPage() {
   const [processingStage, setProcessingStage] = useState<string>("Initializing")
   const supabase = getSupabaseClient()
 
-  // Update the handleAuth function to better handle code exchange
+  // Enhance the error handling and session verification in the handleAuth function
   const handleAuth = async () => {
     try {
       console.log("Auth callback processing started")

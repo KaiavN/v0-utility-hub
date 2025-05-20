@@ -85,7 +85,15 @@ export function LoginModal({
       }
     } catch (error: any) {
       console.error("LoginModal.handleSubmit: Error during login:", error)
-      setErrorMessage(error.message || "An error occurred during login")
+
+      // Provide more specific error messages based on the error
+      if (error.message?.includes("Invalid login credentials")) {
+        setErrorMessage("Invalid email or password")
+      } else if (error.message?.includes("network")) {
+        setErrorMessage("Network error. Please check your connection and try again.")
+      } else {
+        setErrorMessage(error.message || "An error occurred during login")
+      }
     } finally {
       console.log("LoginModal.handleSubmit: Setting isLoading to false")
       setIsLoading(false)

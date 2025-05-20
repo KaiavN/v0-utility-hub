@@ -113,9 +113,5 @@ export function AuthButton() {
     )
   }
 
-  return (
-    <div className="flex gap-2">
-      <GitHubLoginButton variant="outline" size="sm" />
-    </div>
-  )
+  return <GitHubLoginButton variant="outline" size="sm" />
 }

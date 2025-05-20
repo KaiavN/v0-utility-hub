@@ -88,6 +88,16 @@ export async function createSupabaseClientAsync() {
           persistSession: true,
           autoRefreshToken: true,
         },
+        realtime: {
+          params: {
+            eventsPerSecond: 10,
+          },
+        },
+        global: {
+          headers: {
+            "x-application-name": "utility-hub",
+          },
+        },
       })
     }
 
@@ -129,6 +139,16 @@ export function createSupabaseClient() {
           auth: {
             persistSession: true,
             autoRefreshToken: true,
+          },
+          realtime: {
+            params: {
+              eventsPerSecond: 10,
+            },
+          },
+          global: {
+            headers: {
+              "x-application-name": "utility-hub",
+            },
           },
         })
         return supabaseInstance

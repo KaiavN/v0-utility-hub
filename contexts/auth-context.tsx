@@ -18,11 +18,11 @@ interface AuthContextType {
   isAuthenticated: boolean
   isLoading: boolean
   loginWithGitHub: () => Promise<void>
-  loginWithGoogle: () => Promise<void>
   logout: () => Promise<void>
   deleteAccount: () => Promise<boolean>
   profile: any | null
   updateProfile: (data: any) => Promise<boolean>
+  debugAuthState: () => any
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -32,10 +32,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<any | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [authError, setAuthError] = useState<Error | null>(null)
   const router = useRouter()
 
   // Get Supabase client
   const supabase = getSupabaseClient()
+
+  // Debug function to expose auth state
+  const debugAuthState = () => {
+    return {
+      user,
+      profile,
+      isAuthenticated,
+      isLoading,
+      authError: authError?.message,
+      hasSupabase: !!supabase,
+      timestamp: new Date().toISOString(),
+    }
+  }
 
   // Helper function to ensure user profile exists
   const ensureUserProfile = async (userData: User) => {
@@ -102,8 +116,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const loadUser = async () => {
       setIsLoading(true)
+      setAuthError(null)
 
       try {
+        console.log("Checking authentication state...")
+
         // Check if we have a session
         const {
           data: { session },
@@ -112,11 +129,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (sessionError) {
           console.error("Error getting session:", sessionError)
+          setAuthError(sessionError)
           throw sessionError
         }
 
         if (session) {
           // User is logged in
+          console.log("Session found, user is authenticated")
+
           const userData: User = {
             id: session.user.id,
             email: session.user.email || "",
@@ -131,16 +151,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await ensureUserProfile(userData)
         } else {
           // No active session
+          console.log("No session found, user is not authenticated")
           setUser(null)
           setProfile(null)
           setIsAuthenticated(false)
         }
       } catch (error) {
         console.error("Error loading user:", error)
+        setAuthError(error instanceof Error ? error : new Error(String(error)))
         setUser(null)
         setProfile(null)
         setIsAuthenticated(false)
       } finally {
+        console.log("Auth loading complete, state:", {
+          isAuthenticated: !!user,
+          hasUser: !!user,
+        })
         setIsLoading(false)
       }
     }
@@ -161,6 +187,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (event === "SIGNED_IN" && session) {
         // User signed in
+        console.log("User signed in event received")
+
         const userData: User = {
           id: session.user.id,
           email: session.user.email || "",
@@ -181,6 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         router.push(redirectPath)
       } else if (event === "SIGNED_OUT" || event === "USER_DELETED") {
         // User signed out
+        console.log("User signed out event received")
         setUser(null)
         setProfile(null)
         setIsAuthenticated(false)
@@ -207,7 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return "https://utilhub.vercel.app"
   }
 
-  // GitHub authentication function
+  // Update the loginWithGitHub function to be more robust
   const loginWithGitHub = async (): Promise<void> => {
     try {
       setIsLoading(true)
@@ -215,10 +244,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Store the current path to redirect back after login
       if (typeof window !== "undefined") {
         sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
+
+        // Clear any previous auth state to ensure a clean login
+        sessionStorage.removeItem("authError")
+        localStorage.removeItem("supabase.auth.token")
+        localStorage.removeItem("supabase.auth.refreshToken")
       }
 
       const siteUrl = getSiteUrl()
       console.log("Logging in with GitHub, redirect URL:", `${siteUrl}/auth/callback`)
+
+      // First, try to sign out to ensure a clean authentication state
+      try {
+        await supabase.auth.signOut({ scope: "local" })
+        console.log("Signed out before GitHub login")
+      } catch (signOutError) {
+        console.warn("Error signing out before GitHub login:", signOutError)
+        // Continue anyway
+      }
+
+      // Add a small delay to ensure signOut completes
+      await new Promise((resolve) => setTimeout(resolve, 300))
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
@@ -231,6 +277,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         console.error("GitHub login error:", error)
+        setAuthError(error)
         toast({
           title: "Login Failed",
           description: error.message || "Failed to login with GitHub",
@@ -240,85 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error("GitHub login unexpected error:", error)
-      toast({
-        title: "Login Failed",
-        description: "An unexpected error occurred",
-        variant: "destructive",
-      })
-      setIsLoading(false)
-    }
-  }
-
-  // Update the loginWithGoogle function to be more reliable
-  const loginWithGoogle = async (): Promise<void> => {
-    try {
-      setIsLoading(true)
-
-      // Store the current path to redirect back after login
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
-
-        // Clear any previous auth errors or state
-        sessionStorage.removeItem("authError")
-        localStorage.removeItem("supabase.auth.token")
-        localStorage.removeItem("supabase.auth.refreshToken")
-      }
-
-      // Use the Supabase callback URL directly instead of our custom one
-      const redirectUrl = "https://hguhugnlvlmvtrduwiyn.supabase.co/auth/v1/callback"
-      console.log("Logging in with Google, redirect URL:", redirectUrl)
-
-      // First, try to sign out to ensure a clean authentication state
-      try {
-        await supabase.auth.signOut({ scope: "local" })
-        console.log("Signed out before Google login")
-      } catch (signOutError) {
-        console.warn("Error signing out before Google login:", signOutError)
-        // Continue anyway
-      }
-
-      // Add a small delay to ensure signOut completes
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Use the Supabase callback URL
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: redirectUrl,
-          scopes: "email profile",
-          queryParams: {
-            access_type: "offline",
-            prompt: "consent select_account", // Force consent screen to appear
-          },
-        },
-      })
-
-      if (error) {
-        console.error("Google login error:", error)
-        toast({
-          title: "Login Failed",
-          description: error.message || "Failed to login with Google",
-          variant: "destructive",
-        })
-        setIsLoading(false)
-        return
-      }
-
-      // If we have a URL, redirect to it
-      if (data?.url) {
-        console.log("Redirecting to Google OAuth URL:", data.url)
-        window.location.href = data.url
-      } else {
-        console.error("No redirect URL returned from signInWithOAuth")
-        toast({
-          title: "Login Failed",
-          description: "Failed to initiate Google login",
-          variant: "destructive",
-        })
-        setIsLoading(false)
-      }
-    } catch (error) {
-      console.error("Google login unexpected error:", error)
+      setAuthError(error instanceof Error ? error : new Error(String(error)))
       toast({
         title: "Login Failed",
         description: "An unexpected error occurred",
@@ -360,6 +329,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       router.push("/")
     } catch (error) {
       console.error("Logout error:", error)
+      setAuthError(error instanceof Error ? error : new Error(String(error)))
       toast({
         title: "Logout Failed",
         description: error instanceof Error ? error.message : "An unexpected error occurred",
@@ -438,6 +408,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return true
     } catch (error) {
       console.error("Delete account error:", error)
+      setAuthError(error instanceof Error ? error : new Error(String(error)))
       toast({
         title: "Delete Account Failed",
         description: error instanceof Error ? error.message : "An unexpected error occurred",
@@ -467,6 +438,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         console.error("Error updating profile:", error)
+        setAuthError(error)
         toast({
           title: "Update Failed",
           description: error.message || "Failed to update profile",
@@ -497,6 +469,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return true
     } catch (error) {
       console.error("Update profile error:", error)
+      setAuthError(error instanceof Error ? error : new Error(String(error)))
       toast({
         title: "Update Failed",
         description: "An unexpected error occurred",
@@ -516,10 +489,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated,
         isLoading,
         loginWithGitHub,
-        loginWithGoogle,
         logout,
         deleteAccount,
         updateProfile,
+        debugAuthState,
       }}
     >
       {children}
