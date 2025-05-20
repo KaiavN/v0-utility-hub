@@ -12,7 +12,17 @@ import { CreateGroupDialog } from "@/components/messaging/create-group-dialog"
 import { BlockedUsersDialog } from "@/components/messaging/blocked-users-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Search, Users, UserPlus, Ban, Trash2, MessageSquare, RefreshCw, AlertCircle } from "lucide-react"
+import {
+  Search,
+  Users,
+  UserPlus,
+  Ban,
+  Trash2,
+  MessageSquare,
+  MessageSquarePlus,
+  RefreshCw,
+  AlertCircle,
+} from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -63,7 +73,7 @@ export function ConversationList() {
   })
 
   return (
-    <div className="flex flex-col h-full border-r">
+    <div className="flex flex-col h-full border-r min-w-[320px] w-[320px]">
       <div className="p-4 border-b">
         <h2 className="font-semibold mb-2">Conversations</h2>
         <div className="flex items-center gap-2 mb-3">
@@ -92,7 +102,13 @@ export function ConversationList() {
             <Users className="h-4 w-4 mr-2" />
             New Group
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setBlockedUsersOpen(true)} title="Blocked Users">
+          <Button
+            variant="outline"
+            size="sm"
+            className="px-3"
+            onClick={() => setBlockedUsersOpen(true)}
+            title="Blocked Users"
+          >
             <Ban className="h-4 w-4" />
           </Button>
         </div>
@@ -130,7 +146,11 @@ export function ConversationList() {
           ) : (
             <>
               <MessageSquare className="h-12 w-12 mb-3 text-muted-foreground/50" />
-              <p className="text-lg font-medium">No conversations</p>
+              <h3 className="font-medium mb-4">No conversations</h3>
+              <Button onClick={() => setSearchOpen(true)}>
+                <MessageSquarePlus className="h-4 w-4 mr-2" />
+                Start a conversation
+              </Button>
             </>
           )}
         </div>
