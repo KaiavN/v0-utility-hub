@@ -299,71 +299,146 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Improved logout function
+  // Comprehensive logout function that ensures complete session termination
   const logout = async () => {
     try {
       setIsLoading(true)
+      console.log("Starting logout process...")
 
-      // Clear local storage items related to auth
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("supabase.auth.token")
-        localStorage.removeItem("supabase.auth.refreshToken")
-        localStorage.removeItem("sb-access-token")
-        localStorage.removeItem("sb-refresh-token")
-      }
-
-      // Call the logout API endpoint
-      const response = await fetch("/api/auth/logout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Logout failed")
-      }
-
-      // Try to manually sign out with Supabase as well
-      try {
-        await supabase.auth.signOut({ scope: "global" })
-      } catch (supabaseError) {
-        console.warn("Additional Supabase signOut failed:", supabaseError)
-        // Continue regardless
-      }
-
-      // Clear local state
+      // Immediately update UI state to reflect logout
+      // This ensures the UI shows logged out state even if API calls take time
       setUser(null)
       setProfile(null)
       setIsAuthenticated(false)
 
+      // Clear all auth-related items from localStorage
+      if (typeof window !== "undefined") {
+        // Clear specific Supabase items
+        const authItemPrefixes = ["sb-", "supabase-", "auth-"]
+
+        // Get all localStorage keys
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (
+            key &&
+            (authItemPrefixes.some((prefix) => key.startsWith(prefix)) || key.includes("auth") || key.includes("token"))
+          ) {
+            console.log(`Clearing localStorage item: ${key}`)
+            localStorage.removeItem(key)
+          }
+        }
+
+        // Explicitly remove known items
+        const knownItems = [
+          "supabase.auth.token",
+          "supabase.auth.refreshToken",
+          "sb-access-token",
+          "sb-refresh-token",
+          "supabaseSession",
+          "authUser",
+          "sb-auth-token",
+          "sb-provider-token",
+          "sb-auth-event",
+          "sb-auth-data",
+        ]
+
+        knownItems.forEach((item) => {
+          localStorage.removeItem(item)
+        })
+      }
+
+      // Try to sign out with Supabase directly first
+      try {
+        console.log("Calling Supabase signOut...")
+        await supabase.auth.signOut({ scope: "global" })
+        console.log("Supabase signOut completed")
+      } catch (supabaseError) {
+        console.warn("Supabase signOut error:", supabaseError)
+        // Continue with API call regardless
+      }
+
+      // Call our API endpoint to handle server-side logout
+      console.log("Calling logout API endpoint...")
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // Add cache control headers
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+        },
+        // Prevent caching
+        cache: "no-store",
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.warn("Logout API error:", errorData)
+        // Continue anyway - we've already cleared client-side state
+      } else {
+        console.log("Logout API call successful")
+      }
+
+      // Clear any session cookies manually as a fallback
+      if (typeof document !== "undefined") {
+        const cookiesToClear = [
+          "sb-access-token",
+          "sb-refresh-token",
+          "supabase-auth-token",
+          "__session",
+          "sb-auth-token",
+        ]
+
+        cookiesToClear.forEach((cookieName) => {
+          document.cookie = `${cookieName}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax;`
+        })
+
+        // Also try to clear any cookies without knowing their exact names
+        document.cookie.split(";").forEach((cookie) => {
+          const [name] = cookie.trim().split("=")
+          if (name && (name.includes("sb-") || name.includes("auth") || name.includes("token"))) {
+            document.cookie = `${name}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax;`
+          }
+        })
+      }
+
+      // Show success message
       toast({
         title: "Logged Out",
         description: "You have been successfully logged out",
       })
 
-      // Redirect to home page
-      router.push("/")
+      // Force a hard reload to clear any in-memory state
+      // This is the most reliable way to ensure complete logout
+      if (typeof window !== "undefined") {
+        console.log("Redirecting to home page...")
+        window.location.href = "/"
+        return // Stop execution here as we're reloading the page
+      } else {
+        // Fallback if window is not available
+        router.push("/")
+      }
     } catch (error) {
       console.error("Logout error:", error)
       setAuthError(error instanceof Error ? error : new Error(String(error)))
 
-      // Still try to clear local state even if API call failed
+      // Still ensure local state is cleared
       setUser(null)
       setProfile(null)
       setIsAuthenticated(false)
 
       toast({
         title: "Logout Issue",
-        description:
-          "You've been logged out, but there was an error: " +
-          (error instanceof Error ? error.message : "An unexpected error occurred"),
+        description: "You've been logged out, but there was an error in the process",
         variant: "destructive",
       })
 
       // Redirect to home page anyway
-      router.push("/")
+      if (typeof window !== "undefined") {
+        window.location.href = "/"
+      } else {
+        router.push("/")
+      }
     } finally {
       setIsLoading(false)
     }
