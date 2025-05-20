@@ -1,54 +1,50 @@
 "use client"
 
-import { Button } from "@/components/ui/button"
-import { Github } from "lucide-react"
 import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { Button } from "@/components/ui/button"
+import { useAuth } from "@/contexts/auth-context"
+import { Github } from "lucide-react"
+import { toast } from "@/components/ui/use-toast"
 
-export function GitHubLoginButton() {
-  const [isLoading, setIsLoading] = useState(false)
-  const router = useRouter()
+interface GitHubLoginButtonProps {
+  className?: string
+  variant?: "default" | "outline" | "secondary" | "ghost" | "link" | "destructive"
+  size?: "default" | "sm" | "lg" | "icon"
+}
+
+export function GitHubLoginButton({ className = "", variant = "default", size = "default" }: GitHubLoginButtonProps) {
+  const { loginWithGitHub, isLoading } = useAuth()
+  const [isClicked, setIsClicked] = useState(false)
 
   const handleLogin = async () => {
+    if (isLoading || isClicked) return
+
     try {
-      setIsLoading(true)
-
-      // Redirect to GitHub auth endpoint
-      const response = await fetch("/api/auth/login?provider=github", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
-
-      const data = await response.json()
-
-      if (data.url) {
-        // Redirect to the authorization URL
-        window.location.href = data.url
-      } else {
-        console.error("Failed to get authorization URL")
-        setIsLoading(false)
-      }
+      setIsClicked(true)
+      console.log("GitHub login button clicked")
+      await loginWithGitHub()
+      // No need to reset isClicked as we'll be redirected to GitHub
     } catch (error) {
-      console.error("Error during GitHub login:", error)
-      setIsLoading(false)
+      console.error("Error in GitHub login button:", error)
+      toast({
+        title: "Login Failed",
+        description: "Failed to initiate GitHub login. Please try again.",
+        variant: "destructive",
+      })
+      setIsClicked(false)
     }
   }
 
   return (
-    <Button onClick={handleLogin} disabled={isLoading} className="w-full">
-      {isLoading ? (
-        <>
-          <span className="animate-spin mr-2">⚪</span>
-          Signing in...
-        </>
-      ) : (
-        <>
-          <Github className="h-4 w-4 mr-2" />
-          Sign in with GitHub
-        </>
-      )}
+    <Button
+      variant={variant}
+      size={size}
+      className={`flex items-center gap-2 ${className}`}
+      onClick={handleLogin}
+      disabled={isLoading || isClicked}
+    >
+      <Github className="h-4 w-4" />
+      {isLoading || isClicked ? "Connecting..." : "Sign in with GitHub"}
     </Button>
   )
 }
