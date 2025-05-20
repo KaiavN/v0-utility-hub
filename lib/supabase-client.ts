@@ -88,10 +88,9 @@ export async function createSupabaseClientAsync() {
           persistSession: true,
           autoRefreshToken: true,
         },
+        // Completely disable realtime
         realtime: {
-          params: {
-            eventsPerSecond: 10,
-          },
+          enabled: false,
         },
         global: {
           headers: {
@@ -140,10 +139,9 @@ export function createSupabaseClient() {
             persistSession: true,
             autoRefreshToken: true,
           },
+          // Completely disable realtime
           realtime: {
-            params: {
-              eventsPerSecond: 10,
-            },
+            enabled: false,
           },
           global: {
             headers: {
@@ -167,6 +165,10 @@ export function createSupabaseClient() {
             auth: {
               persistSession: true,
               autoRefreshToken: true,
+            },
+            // Completely disable realtime
+            realtime: {
+              enabled: false,
             },
           })
         }
@@ -249,6 +251,10 @@ function createDummyClient() {
     }),
     rpc: () => Promise.resolve({ data: null, error: null }),
     removeChannel: () => {},
+    channel: () => ({
+      on: () => ({ on: () => ({ on: () => ({ on: () => ({ subscribe: () => {} }) }) }) }),
+      subscribe: () => {},
+    }),
   }
 }
 

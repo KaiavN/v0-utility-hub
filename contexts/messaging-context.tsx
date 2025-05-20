@@ -134,6 +134,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated } = useAuth()
   const [state, dispatch] = useReducer(messagingReducer, initialState)
   const supabase = createSupabaseClient()
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // useRef to hold the latest refreshConversations function
   // This is to avoid the "use before declaration" error
@@ -553,133 +554,17 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       // First get blocked users
       const blockedUserIds = await fetchBlockedUsers()
 
-      // Get conversations
-      const { data: conversations, error: conversationsError } = await supabase
-        .from("conversation_members")
-        .select(`
-          conversation:conversation_id (
-            id,
-            type,
-            name,
-            description,
-            avatar_url,
-            created_by
-          ),
-          user_id
-        `)
-        .eq("user_id", user.id)
+      // Get conversations using the API route instead of direct Supabase query
+      // This avoids the recursive policy issue
+      const response = await fetch(`/api/messages/conversations?userId=${user.id}`)
 
-      if (conversationsError) {
-        console.error("Error fetching conversations:", conversationsError)
-        dispatch({ type: "SET_ERROR", payload: conversationsError.message })
-        return
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to fetch conversations")
       }
 
-      // Prepare a list of unique conversation IDs
-      const conversationIds = conversations.map((c) => c.conversation.id)
-
-      // For each conversation ID, get the last message and unread count
-      const conversationSummaries: ConversationSummary[] = []
-
-      for (const conversationId of conversationIds) {
-        try {
-          // Get the conversation details
-          const { data: conversationData, error: convError } = await supabase
-            .from("conversations")
-            .select("*")
-            .eq("id", conversationId)
-            .single()
-
-          if (convError) {
-            console.error(`Error fetching conversation ${conversationId}:`, convError)
-            continue
-          }
-
-          const conversation = conversationData
-
-          // Handle different conversation types
-          const conversationSummary: Partial<ConversationSummary> = {
-            id: conversationId,
-            type: conversation.type as "direct" | "group",
-            lastMessage: null,
-            lastMessageTimestamp: null,
-            unreadCount: 0,
-          }
-
-          // For direct chats, get the other participant
-          if (conversation.type === "direct") {
-            // Get the other participant
-            const { data: otherParticipant, error: partError } = await supabase
-              .from("conversation_members")
-              .select("user_id, profiles:user_id(display_name, email)")
-              .eq("conversation_id", conversationId)
-              .neq("user_id", user.id)
-              .single()
-
-            if (partError) {
-              console.error(`Error fetching other participant for ${conversationId}:`, partError)
-              continue
-            }
-
-            // Skip if other participant is blocked
-            if (blockedUserIds.includes(otherParticipant.user_id)) {
-              continue
-            }
-
-            conversationSummary.participantId = otherParticipant.user_id
-            conversationSummary.participantName =
-              otherParticipant.profiles?.display_name ||
-              otherParticipant.profiles?.email ||
-              `User ${otherParticipant.user_id.substring(0, 5)}`
-          } else {
-            // For group chats, use the group name
-            conversationSummary.name = conversation.name
-            conversationSummary.description = conversation.description
-            conversationSummary.avatar_url = conversation.avatar_url
-          }
-
-          // Get the latest message
-          const { data: latestMessages, error: msgError } = await supabase
-            .from("messages")
-            .select("*")
-            .eq("conversation_id", conversationId)
-            .order("created_at", { ascending: false })
-            .limit(1)
-
-          if (msgError) {
-            console.error(`Error fetching latest message for ${conversationId}:`, msgError)
-          } else if (latestMessages && latestMessages.length > 0) {
-            conversationSummary.lastMessage = latestMessages[0].content
-            conversationSummary.lastMessageTimestamp = latestMessages[0].created_at
-          }
-
-          // Get unread count
-          const { count: unreadCount, error: countError } = await supabase
-            .from("messages")
-            .select("*", { count: "exact", head: true })
-            .eq("conversation_id", conversationId)
-            .eq("read", false)
-            .neq("sender_id", user.id)
-
-          if (countError) {
-            console.error(`Error fetching unread count for ${conversationId}:`, countError)
-          } else {
-            conversationSummary.unreadCount = unreadCount || 0
-          }
-
-          conversationSummaries.push(conversationSummary as ConversationSummary)
-        } catch (error) {
-          console.error(`Error processing conversation ${conversationId}:`, error)
-          // Continue with other conversations
-        }
-      }
-
-      // Sort by latest message
-      conversationSummaries.sort((a, b) => {
-        if (!a.lastMessageTimestamp) return 1
-        if (!b.lastMessageTimestamp) return -1
-        return new Date(b.lastMessageTimestamp).getTime() - new Date(a.lastMessageTimestamp).getTime()
-      })
+      const data = await response.json()
+      const conversationSummaries = data.conversations || []
 
       dispatch({ type: "SET_CONVERSATIONS", payload: conversationSummaries })
     } catch (err) {
@@ -693,7 +578,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     } finally {
       dispatch({ type: "SET_LOADING", payload: false })
     }
-  }, [isAuthenticated, user, supabase, clearError, fetchBlockedUsers])
+  }, [isAuthenticated, user, clearError, fetchBlockedUsers])
 
   // Refresh conversations
   const refreshConversations = useCallback(async () => {
@@ -1053,31 +938,6 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     [isAuthenticated, user, supabase, state.messages],
   )
 
-  // Set typing status - DEPRECATED
-  // const setTypingStatus = useCallback(
-  //   async (conversationId: string, isTyping: boolean) => {
-  //     if (!isAuthenticated || !user?.id || !conversationId) {
-  //       return
-  //     }
-
-  //     try {
-  //       // Update typing status in the database
-  //       const { error } = await supabase.rpc("update_typing_status", {
-  //         p_conversation_id: conversationId,
-  //         p_user_id: user.id,
-  //         p_is_typing: isTyping,
-  //       })
-
-  //       if (error) {
-  //         console.error("Error updating typing status:", error)
-  //       }
-  //     } catch (err) {
-  //       console.error("Unexpected error updating typing status:", err)
-  //     }
-  //   },
-  //   [isAuthenticated, user, supabase],
-  // )
-
   // Delete a conversation
   const deleteConversation = useCallback(
     async (conversationId: string): Promise<boolean> => {
@@ -1189,186 +1049,46 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthenticated, user, fetchBlockedUsers])
 
-  // Set up real-time subscription for messages
+  // Set up polling instead of realtime subscriptions
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return
 
-    let subscription
-    try {
-      subscription = supabase
-        .channel("messages-channel")
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "messages",
-          },
-          async (payload) => {
-            const newMessage = payload.new as any
+    // Set up polling for active conversation and conversations list
+    const setupPolling = () => {
+      // Clear any existing interval
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
 
-            // Skip messages from blocked users
-            if (state.blockedUsers.includes(newMessage.sender_id)) {
-              return
-            }
-
-            // Fetch the sender info
-            const { data: sender } = await supabase
-              .from("profiles")
-              .select("display_name, avatar_url")
-              .eq("id", newMessage.sender_id)
-              .single()
-
-            const formattedMessage: Message = {
-              id: newMessage.id,
-              content: newMessage.content,
-              created_at: newMessage.created_at,
-              read: newMessage.read,
-              sender_id: newMessage.sender_id,
-              conversation_id: newMessage.conversation_id,
-              sender_name: sender?.display_name || "Unknown",
-              sender_avatar: sender?.avatar_url || null,
-            }
-
-            // Add message to state if it's for the current conversation
-            dispatch({ type: "ADD_MESSAGE", payload: formattedMessage })
-
-            // Mark as read if it's the active conversation and not from the current user
-            if (state.activeConversation === newMessage.conversation_id && newMessage.sender_id !== user.id) {
-              markMessagesAsRead(newMessage.conversation_id)
-            }
-
-            // Refresh conversations to update the list
-            refreshConversationsRef.current()
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "UPDATE",
-            schema: "public",
-            table: "typing_status",
-          },
-          async (payload) => {
-            const typingStatus = payload.new as any
-
-            // Only update typing status if it's not the current user
-            if (typingStatus.user_id !== user.id) {
-              dispatch({
-                type: "SET_TYPING",
-                payload: {
-                  conversationId: typingStatus.conversation_id,
-                  isTyping: typingStatus.is_typing,
-                },
-              })
-            }
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "blocked_users",
-          },
-          async (payload) => {
-            if (payload.new.blocker_id === user.id || payload.new.blocked_id === user.id) {
-              await fetchBlockedUsers()
-              await refreshConversationsRef.current()
-            }
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "DELETE",
-            schema: "public",
-            table: "blocked_users",
-          },
-          async (payload) => {
-            if (payload.old.blocker_id === user.id || payload.old.blocked_id === user.id) {
-              await fetchBlockedUsers()
-              await refreshConversationsRef.current()
-            }
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "conversation_members",
-          },
-          async (payload) => {
-            // Refresh conversations if there's any change to conversation members
-            await refreshConversationsRef.current()
-
-            // If this is the active conversation, refresh group members
-            if (
-              state.activeConversation === payload.new?.conversation_id ||
-              state.activeConversation === payload.old?.conversation_id
-            ) {
-              const conversationId = state.activeConversation
-              if (conversationId) {
-                await getGroupMembers(conversationId)
-              }
-            }
-          },
-        )
-        .subscribe((status) => {
-          if (status === "CHANNEL_ERROR") {
-            console.warn("Supabase realtime channel error. Falling back to polling.")
-            // Set up polling as fallback
-            const pollingInterval = setInterval(() => {
-              if (state.activeConversation) {
-                fetchMessages(state.activeConversation)
-              }
-              refreshConversationsRef.current()
-            }, 10000) // Poll every 10 seconds
-
-            return () => clearInterval(pollingInterval)
-          }
-        })
-    } catch (error) {
-      console.error("Error setting up realtime subscription:", error)
-      // Set up polling as fallback
-      const pollingInterval = setInterval(() => {
+      // Set up new polling interval
+      pollingIntervalRef.current = setInterval(() => {
+        // Poll for new messages if there's an active conversation
         if (state.activeConversation) {
           fetchMessages(state.activeConversation)
         }
-        refreshConversationsRef.current()
-      }, 10000) // Poll every 10 seconds
 
-      return () => clearInterval(pollingInterval)
+        // Poll for conversation updates
+        refreshConversationsRef.current()
+      }, 5000) // Poll every 5 seconds
     }
 
+    // Start polling
+    setupPolling()
+
+    // Clean up on unmount
     return () => {
-      if (subscription) {
-        try {
-          supabase.removeChannel(subscription)
-        } catch (error) {
-          console.error("Error removing channel:", error)
-        }
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
       }
     }
-  }, [
-    isAuthenticated,
-    user,
-    supabase,
-    state.activeConversation,
-    state.blockedUsers,
-    markMessagesAsRead,
-    fetchBlockedUsers,
-    getGroupMembers,
-    fetchMessages,
-  ])
+  }, [isAuthenticated, user, state.activeConversation, fetchMessages])
 
   // Load conversations on initial mount
   useEffect(() => {
     if (isAuthenticated && user?.id) {
       fetchConversations()
     }
-  }, [isAuthenticated, user])
+  }, [isAuthenticated, user, fetchConversations])
 
   return (
     <MessagingContext.Provider
