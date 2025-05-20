@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { createSupabaseClientAsync, getSupabaseClient } from "@/lib/supabase-client"
+import { getSupabaseClient, initSupabaseClient } from "@/lib/supabase-client"
 import { toast } from "@/components/ui/use-toast"
 
 export default function AuthCallbackPage() {
@@ -11,12 +11,14 @@ export default function AuthCallbackPage() {
   const [error, setError] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(true)
   const [debugInfo, setDebugInfo] = useState<any>({})
+  const [processingStep, setProcessingStep] = useState("Initializing")
 
   useEffect(() => {
     const handleCallback = async () => {
       try {
         setIsProcessing(true)
         console.log("Auth callback page loaded")
+        setProcessingStep("Page loaded")
 
         // Collect debug information
         const debug = {
@@ -29,45 +31,23 @@ export default function AuthCallbackPage() {
         setDebugInfo(debug)
         console.log("Debug info:", debug)
 
-        // Check if we have a hash fragment that might contain the token
-        // This is a fallback for some OAuth providers
-        if (typeof window !== "undefined" && window.location.hash) {
-          console.log("Hash fragment found:", window.location.hash)
+        // Make sure Supabase client is initialized
+        setProcessingStep("Initializing Supabase client")
+        await initSupabaseClient()
+        const supabase = getSupabaseClient()
 
-          // Let Supabase handle the hash fragment
-          const supabase = getSupabaseClient()
-
-          // This will trigger the onAuthStateChange listener in auth-context.tsx
-          const { error: hashError } = await supabase.auth.getSession()
-
-          if (hashError) {
-            console.error("Error processing hash fragment:", hashError)
-          } else {
-            console.log("Hash fragment processed, redirecting...")
-
-            // Get redirect path from localStorage or default to home
-            const redirectTo = localStorage.getItem("redirectAfterLogin") || "/"
-            localStorage.removeItem("redirectAfterLogin")
-
-            // Redirect to the stored path
-            router.push(redirectTo)
-            return
-          }
-        }
-
-        // Get the code from the URL
+        // Get the code from URL
         const code = searchParams.get("code")
 
         if (!code) {
           console.error("No code found in URL")
           setError("No authentication code found in the callback URL. Please try logging in again.")
+          setProcessingStep("Error: No code found")
           return
         }
 
         console.log("Code found in URL, exchanging for session")
-
-        // Get Supabase client
-        const supabase = await createSupabaseClientAsync()
+        setProcessingStep("Exchanging code for session")
 
         // Exchange code for session
         const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
@@ -75,6 +55,7 @@ export default function AuthCallbackPage() {
         if (exchangeError) {
           console.error("Error exchanging code for session:", exchangeError)
           setError(`Authentication error: ${exchangeError.message}`)
+          setProcessingStep(`Error: ${exchangeError.message}`)
           toast({
             title: "Authentication Error",
             description: exchangeError.message,
@@ -86,24 +67,39 @@ export default function AuthCallbackPage() {
         if (!data.session) {
           console.error("No session returned after code exchange")
           setError("Failed to create session. The authentication code may have expired.")
+          setProcessingStep("Error: No session returned")
           return
         }
 
-        console.log("Successfully authenticated user")
+        console.log("Successfully authenticated user, session established")
+        setProcessingStep("Session established")
 
         // Get redirect path from localStorage or default to home
         let redirectTo = "/"
         if (typeof window !== "undefined") {
           redirectTo = localStorage.getItem("redirectAfterLogin") || "/"
           localStorage.removeItem("redirectAfterLogin")
+          console.log("Will redirect to:", redirectTo)
         }
 
+        // Force a refresh of the auth state
+        setProcessingStep("Refreshing auth state")
+        const { data: refreshData } = await supabase.auth.getSession()
+        console.log("Session refresh result:", refreshData.session ? "Session exists" : "No session")
+
+        // Add a small delay to ensure everything is processed
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+
         // Redirect to the stored path
+        setProcessingStep("Redirecting")
         console.log("Redirecting to:", redirectTo)
-        router.push(redirectTo)
+
+        // Use window.location for a hard redirect to ensure a fresh state
+        window.location.href = redirectTo
       } catch (err) {
         console.error("Unexpected error in auth callback:", err)
         setError(err instanceof Error ? err.message : "An unexpected error occurred")
+        setProcessingStep(`Error: ${err instanceof Error ? err.message : "Unknown error"}`)
       } finally {
         setIsProcessing(false)
       }
@@ -111,6 +107,13 @@ export default function AuthCallbackPage() {
 
     handleCallback()
   }, [router, searchParams])
+
+  // Add a manual retry button
+  const handleManualRedirect = () => {
+    const redirectTo = localStorage.getItem("redirectAfterLogin") || "/"
+    localStorage.removeItem("redirectAfterLogin")
+    window.location.href = redirectTo
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center">
@@ -120,9 +123,12 @@ export default function AuthCallbackPage() {
         </h2>
 
         {isProcessing && (
-          <div className="flex justify-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-white"></div>
-          </div>
+          <>
+            <div className="flex justify-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-white"></div>
+            </div>
+            <p className="text-center text-gray-600 dark:text-gray-300">{processingStep}</p>
+          </>
         )}
 
         {error && (
@@ -137,15 +143,26 @@ export default function AuthCallbackPage() {
           </div>
         )}
 
-        {!isProcessing && !error && <p className="text-center">Redirecting you to the application...</p>}
-
-        {/* Debug information in development */}
-        {process.env.NODE_ENV !== "production" && error && (
-          <div className="mt-4 p-4 bg-gray-100 dark:bg-gray-700 rounded-md text-xs overflow-auto">
-            <h3 className="font-bold mb-2">Debug Information:</h3>
-            <pre>{JSON.stringify(debugInfo, null, 2)}</pre>
-          </div>
+        {!isProcessing && !error && (
+          <>
+            <p className="text-center">Authentication successful! Redirecting you to the application...</p>
+            <button
+              onClick={handleManualRedirect}
+              className="mt-4 w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md"
+            >
+              Click here if you're not redirected automatically
+            </button>
+          </>
         )}
+
+        {/* Debug information */}
+        <div className="mt-4 p-4 bg-gray-100 dark:bg-gray-700 rounded-md text-xs overflow-auto">
+          <h3 className="font-bold mb-2">Debug Information:</h3>
+          <p>Current step: {processingStep}</p>
+          <p>Processing: {isProcessing ? "Yes" : "No"}</p>
+          <p>Error: {error || "None"}</p>
+          <pre className="mt-2 overflow-x-auto">{JSON.stringify(debugInfo, null, 2)}</pre>
+        </div>
       </div>
     </div>
   )
