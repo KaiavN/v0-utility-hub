@@ -142,10 +142,10 @@ export default function MessagesPage() {
 
           {/* Desktop View */}
           <div className="hidden md:flex flex-1 overflow-hidden border rounded-lg shadow-sm">
-            <div className="w-1/3 lg:w-1/4 h-full">
+            <div className="w-2/5 lg:w-1/3 h-full">
               <ConversationList />
             </div>
-            <div className="w-2/3 lg:w-3/4 h-full">
+            <div className="w-3/5 lg:w-2/3 h-full">
               <ConversationView />
             </div>
           </div>

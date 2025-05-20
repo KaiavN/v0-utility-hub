@@ -12,17 +12,7 @@ import { CreateGroupDialog } from "@/components/messaging/create-group-dialog"
 import { BlockedUsersDialog } from "@/components/messaging/blocked-users-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import {
-  Search,
-  Users,
-  UserPlus,
-  Ban,
-  Trash2,
-  MessageSquare,
-  MessageSquarePlus,
-  RefreshCw,
-  AlertCircle,
-} from "lucide-react"
+import { Search, Users, UserPlus, Ban, Trash2, MessageSquare, RefreshCw, AlertCircle } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -140,12 +130,7 @@ export function ConversationList() {
           ) : (
             <>
               <MessageSquare className="h-12 w-12 mb-3 text-muted-foreground/50" />
-              <h3 className="font-medium mb-1">No conversations yet</h3>
-              <p className="text-sm mb-4">Start chatting with someone to begin a conversation</p>
-              <Button onClick={() => setSearchOpen(true)}>
-                <MessageSquarePlus className="h-4 w-4 mr-2" />
-                Start a conversation
-              </Button>
+              <p className="text-lg font-medium">No conversations</p>
             </>
           )}
         </div>
