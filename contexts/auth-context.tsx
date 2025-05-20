@@ -17,7 +17,7 @@ interface AuthContextType {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
-  loginWithGitHub: (redirectUrl?: string, clientId?: string) => Promise<void>
+  loginWithGitHub: () => Promise<void>
   logout: () => Promise<void>
   deleteAccount: () => Promise<boolean>
   profile: any | null
@@ -48,12 +48,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authError: authError?.message,
       hasSupabase: !!supabase,
       timestamp: new Date().toISOString(),
-      envVars: {
-        hasGithubClientId: !!process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID,
-        githubClientIdPrefix: process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID
-          ? process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID.substring(0, 4) + "..."
-          : null,
-      },
     }
   }
 
@@ -210,8 +204,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await ensureUserProfile(userData)
 
         // Redirect to the stored path or home
-        const redirectPath = localStorage.getItem("redirectAfterLogin") || "/"
-        localStorage.removeItem("redirectAfterLogin")
+        const redirectPath = sessionStorage.getItem("redirectAfterLogin") || "/"
+        sessionStorage.removeItem("redirectAfterLogin")
         router.push(redirectPath)
       } else if (event === "SIGNED_OUT" || event === "USER_DELETED") {
         // User signed out
@@ -242,8 +236,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return "https://utilhub.vercel.app"
   }
 
-  // Update the loginWithGitHub function to be more robust
-  const loginWithGitHub = async (providedRedirectUrl?: string, clientId?: string): Promise<void> => {
+  // Update the loginWithGitHub function to handle the OAuth flow correctly
+  const loginWithGitHub = async (): Promise<void> => {
     try {
       setIsLoading(true)
 
@@ -254,18 +248,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Clear any previous auth state to ensure a clean login
         localStorage.removeItem("authError")
-        localStorage.removeItem("supabase.auth.token")
-        localStorage.removeItem("sb-access-token")
-        localStorage.removeItem("sb-refresh-token")
       }
 
-      // Get the site URL for the redirect
       const siteUrl = getSiteUrl()
-
-      // Use the provided redirectUrl or construct a default one
-      // Make sure it's an absolute URL
-      const redirectUrl = providedRedirectUrl || `${siteUrl}/auth/callback`
-      console.log("Logging in with GitHub, redirect URL:", redirectUrl)
+      console.log("Logging in with GitHub, redirect URL:", `${siteUrl}/auth/callback`)
 
       // First, try to sign out to ensure a clean authentication state
       try {
@@ -279,29 +265,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Add a small delay to ensure signOut completes
       await new Promise((resolve) => setTimeout(resolve, 300))
 
-      // Make sure we're using the latest Supabase client
-      const freshSupabase = getSupabaseClient()
+      // Use a consistent and absolute URL for redirectTo
+      const redirectUrl = new URL("/auth/callback", siteUrl).toString()
 
-      // Use the provided client ID or the environment variable
-      const effectiveClientId = clientId || process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID || ""
-
-      console.log("GitHub OAuth configuration:", {
-        redirectUrl,
-        hasClientId: !!effectiveClientId,
-        clientIdPrefix: effectiveClientId ? effectiveClientId.substring(0, 4) + "..." : null,
-      })
-
-      const { data, error } = await freshSupabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
           redirectTo: redirectUrl,
           // Explicitly request the scopes we need
           scopes: "read:user user:email",
-          // Add queryParams to help with debugging
-          queryParams: {
-            client_id: effectiveClientId,
-            redirect_uri: redirectUrl,
-          },
         },
       })
 
@@ -314,11 +286,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           variant: "destructive",
         })
         setIsLoading(false)
-        return
       }
-
-      console.log("OAuth sign-in initiated successfully", data)
-      // The user will be redirected to GitHub for authentication
     } catch (error) {
       console.error("GitHub login unexpected error:", error)
       setAuthError(error instanceof Error ? error : new Error(String(error)))

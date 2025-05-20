@@ -82,9 +82,8 @@ export async function createSupabaseClientAsync() {
     }
 
     // For client-side, use singleton pattern
+    // In the createSupabaseClientAsync function, update the client creation to fix any potential CORS issues
     if (!supabaseInstance) {
-      console.log("Creating new Supabase client instance with URL:", config.url)
-
       supabaseInstance = createClient(config.url, config.anonKey, {
         auth: {
           persistSession: true,
@@ -110,16 +109,6 @@ export async function createSupabaseClientAsync() {
           },
         },
       })
-
-      // Explicitly check for hash fragment and handle it
-      if (window.location.hash && window.location.hash.includes("access_token")) {
-        console.log("Hash fragment detected, handling auth callback")
-        try {
-          await supabaseInstance.auth.getSessionFromUrl()
-        } catch (e) {
-          console.warn("Error handling hash fragment:", e)
-        }
-      }
     }
 
     return supabaseInstance
@@ -286,14 +275,9 @@ export function getSupabaseClient() {
 }
 
 // Helper function to initialize the Supabase client
-export async function initSupabaseClient(forceRefresh = false) {
+export async function initSupabaseClient() {
   if (typeof window === "undefined") {
     return // No need to initialize on server
-  }
-
-  if (forceRefresh && supabaseInstance) {
-    console.log("Forcing refresh of Supabase client")
-    supabaseInstance = null
   }
 
   if (!supabaseInstance) {
