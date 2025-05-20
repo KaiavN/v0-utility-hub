@@ -10,13 +10,22 @@ import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { format } from "date-fns"
-import { MessageSquare, Send, Info, Users, Loader2 } from "lucide-react"
+import { MessageSquare, Send, Info, Users, Loader2, ArrowLeft, MoreVertical, Trash, LogOut } from "lucide-react"
 import { GroupMembersDialog } from "@/components/messaging/group-members-dialog"
 import { TypingIndicator } from "@/components/messaging/typing-indicator"
 import { debounce } from "lodash"
+import { MessageItem } from "@/components/messaging/message-item"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { toast } from "@/components/ui/use-toast"
 
 export function ConversationView() {
-  const { state, sendMessage, setTypingStatus } = useMessaging()
+  const { state, sendMessage, setTypingStatus, setActiveConversation, deleteConversation, leaveGroup } = useMessaging()
   const { user } = useAuth()
   const [message, setMessage] = useState("")
   const [isSending, setIsSending] = useState(false)
@@ -31,10 +40,10 @@ export function ConversationView() {
   const isTyping = state.activeConversation ? state.typingUsers[state.activeConversation] : false
 
   // Create a debounced version of setTypingStatus
-  const debouncedSetTypingStatus = useRef(
+  const debouncedTypingOff = useRef(
     debounce((conversationId: string, isTyping: boolean) => {
       setTypingStatus(conversationId, isTyping)
-    }, 500),
+    }, 2000),
   ).current
 
   // Handle message input change
@@ -45,7 +54,7 @@ export function ConversationView() {
     // Update typing status
     if (state.activeConversation) {
       const isTyping = value.length > 0
-      debouncedSetTypingStatus(state.activeConversation, isTyping)
+      debouncedTypingOff(state.activeConversation, isTyping)
     }
   }
 
@@ -80,6 +89,35 @@ export function ConversationView() {
     }
   }
 
+  // Handle conversation actions
+  const handleDeleteConversation = async () => {
+    if (!state.activeConversation) return
+
+    if (confirm("Are you sure you want to delete this conversation?")) {
+      const success = await deleteConversation(state.activeConversation)
+      if (success) {
+        toast({
+          title: "Conversation deleted",
+          description: "The conversation has been removed",
+        })
+      }
+    }
+  }
+
+  const handleLeaveGroup = async () => {
+    if (!state.activeConversation || activeConversation?.type !== "group") return
+
+    if (confirm("Are you sure you want to leave this group?")) {
+      const success = await leaveGroup(state.activeConversation)
+      if (success) {
+        toast({
+          title: "Left group",
+          description: "You have left the group conversation",
+        })
+      }
+    }
+  }
+
   // Scroll to bottom when new messages arrive
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -111,9 +149,18 @@ export function ConversationView() {
   return (
     <div className="flex flex-col h-full">
       {/* Conversation header */}
-      <div className="p-4 border-b flex justify-between items-center">
+      <div className="p-4 border-b flex justify-between items-center bg-card">
         <div className="flex items-center gap-3">
-          <Avatar>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden mr-1"
+            onClick={() => setActiveConversation(null)}
+            aria-label="Back to conversations"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <Avatar className="h-10 w-10">
             {activeConversation?.type === "group" && activeConversation.avatar_url ? (
               <AvatarImage
                 src={activeConversation.avatar_url || "/placeholder.svg"}
@@ -139,13 +186,34 @@ export function ConversationView() {
           {activeConversation?.type === "group" && (
             <Button variant="outline" size="sm" onClick={() => setShowGroupMembers(true)}>
               <Users className="h-4 w-4 mr-2" />
-              Members
+              <span className="hidden sm:inline">Members</span>
             </Button>
           )}
-          <Button variant="outline" size="sm">
-            <Info className="h-4 w-4 mr-2" />
-            Info
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon">
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => toast({ title: "Info", description: "Conversation info" })}>
+                <Info className="h-4 w-4 mr-2" />
+                Info
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {activeConversation?.type === "group" ? (
+                <DropdownMenuItem onClick={handleLeaveGroup} className="text-red-500">
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Leave Group
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={handleDeleteConversation} className="text-red-500">
+                  <Trash className="h-4 w-4 mr-2" />
+                  Delete Conversation
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -168,34 +236,12 @@ export function ConversationView() {
                 {dateMessages.map((msg) => {
                   const isOwnMessage = msg.sender_id === user?.id
                   return (
-                    <div key={msg.id} className={`flex ${isOwnMessage ? "justify-end" : "justify-start"}`}>
-                      <div className="flex gap-3 max-w-[80%]">
-                        {!isOwnMessage && (
-                          <Avatar className="h-8 w-8">
-                            {msg.sender_avatar ? (
-                              <AvatarImage src={msg.sender_avatar || "/placeholder.svg"} alt={msg.sender_name} />
-                            ) : null}
-                            <AvatarFallback>{msg.sender_name?.charAt(0).toUpperCase() || "U"}</AvatarFallback>
-                          </Avatar>
-                        )}
-                        <div>
-                          {!isOwnMessage && activeConversation?.type === "group" && (
-                            <div className="text-xs font-medium mb-1">{msg.sender_name}</div>
-                          )}
-                          <div
-                            className={`rounded-lg p-3 ${
-                              isOwnMessage ? "bg-primary text-primary-foreground" : "bg-muted"
-                            }`}
-                          >
-                            <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            {format(new Date(msg.created_at), "h:mm a")}
-                            {isOwnMessage && <span className="ml-2">{msg.read ? "Read" : "Sent"}</span>}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                    <MessageItem
+                      key={msg.id}
+                      message={msg}
+                      isOwnMessage={isOwnMessage}
+                      showSender={activeConversation?.type === "group"}
+                    />
                   )
                 })}
               </div>
@@ -207,7 +253,7 @@ export function ConversationView() {
       </ScrollArea>
 
       {/* Message input */}
-      <div className="p-4 border-t">
+      <div className="p-4 border-t bg-card">
         <div className="flex gap-2">
           <Textarea
             ref={textareaRef}

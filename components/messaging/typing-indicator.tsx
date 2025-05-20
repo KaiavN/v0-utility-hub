@@ -2,17 +2,13 @@
 
 export function TypingIndicator() {
   return (
-    <div className="flex items-center gap-1 p-2 text-muted-foreground text-sm">
-      <div className="flex">
-        <span className="animate-bounce">•</span>
-        <span className="animate-bounce" style={{ animationDelay: "0.2s" }}>
-          •
-        </span>
-        <span className="animate-bounce" style={{ animationDelay: "0.4s" }}>
-          •
-        </span>
+    <div className="flex items-center gap-2 p-2 max-w-[100px] ml-2 mb-2">
+      <div className="flex space-x-1">
+        <div className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "0ms" }}></div>
+        <div className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "150ms" }}></div>
+        <div className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "300ms" }}></div>
       </div>
-      <span>Someone is typing</span>
+      <span className="text-xs text-muted-foreground">typing...</span>
     </div>
   )
 }

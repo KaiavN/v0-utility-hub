@@ -122,7 +122,7 @@ export function MessageComposer({ conversationId }: MessageComposerProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="border-t p-4">
+    <form onSubmit={handleSubmit} className="border-t p-4 bg-card">
       <div className="flex flex-col gap-2">
         <Textarea
           ref={textareaRef}

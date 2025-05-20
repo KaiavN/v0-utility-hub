@@ -6,7 +6,7 @@ import { ConversationView } from "./conversation-view"
 import { useEffect, useState } from "react"
 
 export function MobileMessagingView() {
-  const { state } = useMessaging()
+  const { state, setActiveConversation } = useMessaging()
   const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
@@ -27,8 +27,14 @@ export function MobileMessagingView() {
   }
 
   return (
-    <div className="md:hidden w-full h-full">
-      {state.activeConversation ? <ConversationView /> : <ConversationList />}
+    <div className="md:hidden w-full h-full flex flex-col">
+      {state.activeConversation ? (
+        <ConversationView />
+      ) : (
+        <div className="flex-1 overflow-hidden">
+          <ConversationList />
+        </div>
+      )}
     </div>
   )
 }

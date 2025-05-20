@@ -36,7 +36,7 @@ export default function MessagesPage() {
   // Show loading state while checking auth
   if ((isLoading && !authTimeout) || pageLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
         <div className="text-center">
           <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
           <p className="text-muted-foreground">Loading messages...</p>
@@ -59,7 +59,7 @@ export default function MessagesPage() {
   // If auth timed out, show a message with a link to go home
   if (authTimeout) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
         <div className="text-center">
           <h2 className="text-xl font-semibold mb-2">Authentication Timeout</h2>
           <p className="text-muted-foreground mb-4">
@@ -79,11 +79,11 @@ export default function MessagesPage() {
   // If not authenticated, show sign-in prompt instead of redirecting
   if (!isAuthenticated || !user) {
     return (
-      <div className="container mx-auto p-4 h-[calc(100vh-4rem)]">
+      <div className="container max-w-7xl mx-auto px-4 py-6 h-[calc(100vh-4rem)]">
         <div className="flex flex-col h-full">
-          <div className="mb-4 flex justify-between items-center">
+          <div className="mb-6 flex justify-between items-center">
             <div>
-              <h1 className="text-2xl font-bold">Messages</h1>
+              <h1 className="text-3xl font-bold">Messages</h1>
               <p className="text-muted-foreground">Communicate with other users</p>
             </div>
             <Link href="/">
@@ -95,7 +95,7 @@ export default function MessagesPage() {
           </div>
 
           <div className="flex-1 flex items-center justify-center">
-            <div className="text-center max-w-md mx-auto p-8 border rounded-lg shadow-sm">
+            <div className="text-center max-w-md mx-auto p-8 border rounded-lg shadow-sm bg-card">
               <MessageSquare className="h-12 w-12 mx-auto mb-4 text-primary" />
               <h2 className="text-xl font-semibold mb-2">Sign in to access messages</h2>
               <p className="text-muted-foreground mb-6">
@@ -120,11 +120,11 @@ export default function MessagesPage() {
   // User is authenticated, show messages UI
   return (
     <MessagingProvider>
-      <div className="container mx-auto p-4 h-[calc(100vh-4rem)]">
+      <div className="container max-w-7xl mx-auto px-4 py-6 h-[calc(100vh-4rem)]">
         <div className="flex flex-col h-full">
-          <div className="mb-4 flex justify-between items-center">
+          <div className="mb-6 flex justify-between items-center">
             <div>
-              <h1 className="text-2xl font-bold">Messages</h1>
+              <h1 className="text-3xl font-bold">Messages</h1>
               <p className="text-muted-foreground">Communicate with other users</p>
             </div>
             <Link href="/">
@@ -136,16 +136,14 @@ export default function MessagesPage() {
           </div>
 
           {/* Mobile View */}
-          <div className="md:hidden flex-1 overflow-hidden border rounded-lg shadow-sm">
+          <div className="md:hidden flex-1 overflow-hidden border rounded-lg shadow-sm bg-card">
             <MobileMessagingView />
           </div>
 
           {/* Desktop View */}
-          <div className="hidden md:flex flex-1 overflow-hidden border rounded-lg shadow-sm">
-            <div className="w-1/3 lg:w-1/4 h-full">
-              <ConversationList />
-            </div>
-            <div className="w-2/3 lg:w-3/4 h-full">
+          <div className="hidden md:flex flex-1 overflow-hidden border rounded-lg shadow-sm bg-card">
+            <ConversationList />
+            <div className="flex-1 h-full">
               <ConversationView />
             </div>
           </div>
