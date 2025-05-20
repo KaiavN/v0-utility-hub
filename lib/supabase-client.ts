@@ -82,11 +82,22 @@ export async function createSupabaseClientAsync() {
     }
 
     // For client-side, use singleton pattern
+    // In the createSupabaseClientAsync function, update the client creation to fix any potential CORS issues
     if (!supabaseInstance) {
       supabaseInstance = createClient(config.url, config.anonKey, {
         auth: {
           persistSession: true,
           autoRefreshToken: true,
+          storageKey: "sb-auth-token",
+          flowType: "pkce",
+          detectSessionInUrl: true,
+          // Specify cookie options carefully
+          cookieOptions: {
+            secure: location.protocol === "https:",
+            sameSite: "Lax",
+            domain: window.location.hostname,
+            path: "/",
+          },
         },
         // Completely disable realtime
         realtime: {

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/auth-context"
 import { Github } from "lucide-react"
 import { toast } from "@/components/ui/use-toast"
+import { usePathname } from "next/navigation"
 
 interface GitHubLoginButtonProps {
   className?: string
@@ -15,6 +16,7 @@ interface GitHubLoginButtonProps {
 export function GitHubLoginButton({ className = "", variant = "default", size = "default" }: GitHubLoginButtonProps) {
   const { loginWithGitHub, isLoading } = useAuth()
   const [isClicked, setIsClicked] = useState(false)
+  const pathname = usePathname()
 
   const handleLogin = async () => {
     if (isLoading || isClicked) return
@@ -22,6 +24,12 @@ export function GitHubLoginButton({ className = "", variant = "default", size = 
     try {
       setIsClicked(true)
       console.log("GitHub login button clicked")
+
+      // Store current path for redirect after login
+      if (typeof window !== "undefined") {
+        localStorage.setItem("redirectAfterLogin", pathname || "/")
+      }
+
       await loginWithGitHub()
       // No need to reset isClicked as we'll be redirected to GitHub
     } catch (error) {

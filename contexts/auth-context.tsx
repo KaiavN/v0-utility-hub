@@ -243,12 +243,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Store the current path to redirect back after login
       if (typeof window !== "undefined") {
-        sessionStorage.setItem("redirectAfterLogin", window.location.pathname)
+        const currentPath = window.location.pathname
+        localStorage.setItem("redirectAfterLogin", currentPath !== "/login" ? currentPath : "/")
 
         // Clear any previous auth state to ensure a clean login
-        sessionStorage.removeItem("authError")
-        localStorage.removeItem("supabase.auth.token")
-        localStorage.removeItem("supabase.auth.refreshToken")
+        localStorage.removeItem("authError")
       }
 
       const siteUrl = getSiteUrl()
@@ -266,10 +265,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Add a small delay to ensure signOut completes
       await new Promise((resolve) => setTimeout(resolve, 300))
 
+      // Use a consistent and absolute URL for redirectTo
+      const redirectUrl = new URL("/auth/callback", siteUrl).toString()
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
-          redirectTo: `${siteUrl}/auth/callback`,
+          redirectTo: redirectUrl,
           // Explicitly request the scopes we need
           scopes: "read:user user:email",
         },
@@ -290,7 +292,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthError(error instanceof Error ? error : new Error(String(error)))
       toast({
         title: "Login Failed",
-        description: "An unexpected error occurred",
+        description: "An unexpected error occurred during GitHub login",
         variant: "destructive",
       })
       setIsLoading(false)
@@ -301,6 +303,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     try {
       setIsLoading(true)
+
+      // Clear local storage items related to auth
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("supabase.auth.token")
+        localStorage.removeItem("supabase.auth.refreshToken")
+        localStorage.removeItem("sb-access-token")
+        localStorage.removeItem("sb-refresh-token")
+      }
 
       // Call the logout API endpoint
       const response = await fetch("/api/auth/logout", {
@@ -313,6 +323,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.error || "Logout failed")
+      }
+
+      // Try to manually sign out with Supabase as well
+      try {
+        await supabase.auth.signOut({ scope: "global" })
+      } catch (supabaseError) {
+        console.warn("Additional Supabase signOut failed:", supabaseError)
+        // Continue regardless
       }
 
       // Clear local state
@@ -330,11 +348,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error("Logout error:", error)
       setAuthError(error instanceof Error ? error : new Error(String(error)))
+
+      // Still try to clear local state even if API call failed
+      setUser(null)
+      setProfile(null)
+      setIsAuthenticated(false)
+
       toast({
-        title: "Logout Failed",
-        description: error instanceof Error ? error.message : "An unexpected error occurred",
+        title: "Logout Issue",
+        description:
+          "You've been logged out, but there was an error: " +
+          (error instanceof Error ? error.message : "An unexpected error occurred"),
         variant: "destructive",
       })
+
+      // Redirect to home page anyway
+      router.push("/")
     } finally {
       setIsLoading(false)
     }
