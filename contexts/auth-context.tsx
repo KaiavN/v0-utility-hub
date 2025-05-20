@@ -236,6 +236,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return "https://utilhub.vercel.app"
   }
 
+  // Only updating the loginWithGitHub function in the auth context
+
   // Update the loginWithGitHub function to be more robust
   const loginWithGitHub = async (): Promise<void> => {
     try {
@@ -245,13 +247,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (typeof window !== "undefined") {
         const currentPath = window.location.pathname
         localStorage.setItem("redirectAfterLogin", currentPath !== "/login" ? currentPath : "/")
-
-        // Clear any previous auth state to ensure a clean login
-        localStorage.removeItem("authError")
+        console.log("Stored redirect path in loginWithGitHub:", localStorage.getItem("redirectAfterLogin"))
       }
 
       const siteUrl = getSiteUrl()
-      console.log("Logging in with GitHub, redirect URL:", `${siteUrl}/auth/callback`)
+      const redirectUrl = new URL("/auth/callback", siteUrl).toString()
+      console.log("Logging in with GitHub, redirect URL:", redirectUrl)
 
       // First, try to sign out to ensure a clean authentication state
       try {
@@ -266,9 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await new Promise((resolve) => setTimeout(resolve, 300))
 
       // Use a consistent and absolute URL for redirectTo
-      const redirectUrl = new URL("/auth/callback", siteUrl).toString()
-
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
           redirectTo: redirectUrl,
@@ -286,7 +285,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           variant: "destructive",
         })
         setIsLoading(false)
+        return
       }
+
+      // Log the URL that the user will be redirected to
+      if (data?.url) {
+        console.log("User will be redirected to:", data.url)
+      } else {
+        console.warn("No redirect URL returned from signInWithOAuth")
+      }
+
+      // The user will be redirected to GitHub for authentication
+      // No need to do anything else here
     } catch (error) {
       console.error("GitHub login unexpected error:", error)
       setAuthError(error instanceof Error ? error : new Error(String(error)))

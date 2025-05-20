@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { createSupabaseClientAsync } from "@/lib/supabase-client"
+import { createSupabaseClientAsync, getSupabaseClient } from "@/lib/supabase-client"
 import { toast } from "@/components/ui/use-toast"
 
 export default function AuthCallbackPage() {
@@ -10,6 +10,7 @@ export default function AuthCallbackPage() {
   const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(true)
+  const [debugInfo, setDebugInfo] = useState<any>({})
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -17,12 +18,49 @@ export default function AuthCallbackPage() {
         setIsProcessing(true)
         console.log("Auth callback page loaded")
 
+        // Collect debug information
+        const debug = {
+          url: typeof window !== "undefined" ? window.location.href : "SSR",
+          hasSearchParams: !!searchParams,
+          searchParamsEntries: Array.from(searchParams.entries()),
+          timestamp: new Date().toISOString(),
+        }
+
+        setDebugInfo(debug)
+        console.log("Debug info:", debug)
+
+        // Check if we have a hash fragment that might contain the token
+        // This is a fallback for some OAuth providers
+        if (typeof window !== "undefined" && window.location.hash) {
+          console.log("Hash fragment found:", window.location.hash)
+
+          // Let Supabase handle the hash fragment
+          const supabase = getSupabaseClient()
+
+          // This will trigger the onAuthStateChange listener in auth-context.tsx
+          const { error: hashError } = await supabase.auth.getSession()
+
+          if (hashError) {
+            console.error("Error processing hash fragment:", hashError)
+          } else {
+            console.log("Hash fragment processed, redirecting...")
+
+            // Get redirect path from localStorage or default to home
+            const redirectTo = localStorage.getItem("redirectAfterLogin") || "/"
+            localStorage.removeItem("redirectAfterLogin")
+
+            // Redirect to the stored path
+            router.push(redirectTo)
+            return
+          }
+        }
+
         // Get the code from the URL
         const code = searchParams.get("code")
 
         if (!code) {
           console.error("No code found in URL")
-          setError("No authentication code found")
+          setError("No authentication code found in the callback URL. Please try logging in again.")
           return
         }
 
@@ -36,7 +74,7 @@ export default function AuthCallbackPage() {
 
         if (exchangeError) {
           console.error("Error exchanging code for session:", exchangeError)
-          setError(exchangeError.message)
+          setError(`Authentication error: ${exchangeError.message}`)
           toast({
             title: "Authentication Error",
             description: exchangeError.message,
@@ -47,7 +85,7 @@ export default function AuthCallbackPage() {
 
         if (!data.session) {
           console.error("No session returned after code exchange")
-          setError("Failed to create session")
+          setError("Failed to create session. The authentication code may have expired.")
           return
         }
 
@@ -91,15 +129,23 @@ export default function AuthCallbackPage() {
           <div className="p-4 text-red-700 bg-red-100 rounded-md dark:bg-red-900 dark:text-red-100">
             <p>{error}</p>
             <button
-              onClick={() => router.push("/login")}
+              onClick={() => router.push("/")}
               className="mt-4 w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md"
             >
-              Return to Login
+              Return to Home
             </button>
           </div>
         )}
 
         {!isProcessing && !error && <p className="text-center">Redirecting you to the application...</p>}
+
+        {/* Debug information in development */}
+        {process.env.NODE_ENV !== "production" && error && (
+          <div className="mt-4 p-4 bg-gray-100 dark:bg-gray-700 rounded-md text-xs overflow-auto">
+            <h3 className="font-bold mb-2">Debug Information:</h3>
+            <pre>{JSON.stringify(debugInfo, null, 2)}</pre>
+          </div>
+        )}
       </div>
     </div>
   )

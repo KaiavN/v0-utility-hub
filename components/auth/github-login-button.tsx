@@ -27,7 +27,9 @@ export function GitHubLoginButton({ className = "", variant = "default", size = 
 
       // Store current path for redirect after login
       if (typeof window !== "undefined") {
-        localStorage.setItem("redirectAfterLogin", pathname || "/")
+        const currentPath = window.location.pathname
+        localStorage.setItem("redirectAfterLogin", currentPath !== "/login" ? currentPath : "/")
+        console.log("Stored redirect path:", localStorage.getItem("redirectAfterLogin"))
       }
 
       // Get the absolute URL for the callback
