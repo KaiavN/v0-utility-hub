@@ -44,19 +44,67 @@ export default function AuthCallbackPage() {
 
         console.log("Processing auth callback with code")
 
-        // Exchange code for session
+        // Try to handle the URL directly first
+        try {
+          const { data: urlData, error: urlError } = await supabase.auth.getSessionFromUrl({
+            storeSession: true,
+          })
+
+          if (urlData?.session) {
+            console.log("Successfully got session from URL")
+            handleSuccessfulLogin(urlData.session)
+            return
+          }
+
+          if (urlError) {
+            console.warn("Error getting session from URL:", urlError)
+            // Continue to try code exchange as fallback
+          }
+        } catch (urlErr) {
+          console.warn("Error in getSessionFromUrl:", urlErr)
+          // Continue to try code exchange as fallback
+        }
+
+        // Exchange code for session as fallback
         const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
 
         if (exchangeError) {
           console.error("Error exchanging code for session:", exchangeError)
-          setError(exchangeError.message)
-          toast({
-            title: "Authentication Error",
-            description: exchangeError.message,
-            variant: "destructive",
-          })
-          setIsProcessing(false)
-          return
+
+          // If we get an "unable to exchange external code" error, try a different approach
+          if (exchangeError.message.includes("unable to exchange external code")) {
+            try {
+              // Try to refresh the Supabase client and try again
+              await initSupabaseClient(true) // Pass true to force refresh
+              const freshSupabase = getSupabaseClient()
+
+              const { data: retryData, error: retryError } = await freshSupabase.auth.exchangeCodeForSession(code)
+
+              if (retryError) {
+                throw retryError
+              }
+
+              if (retryData.session) {
+                console.log("Successfully exchanged code on retry")
+                handleSuccessfulLogin(retryData.session)
+                return
+              }
+            } catch (retryErr) {
+              console.error("Error on retry:", retryErr)
+              setError("Unable to complete authentication. Please try logging in again.")
+              setIsProcessing(false)
+              return
+            }
+          } else {
+            setError(exchangeError.message)
+            toast({
+              title: "Authentication Error",
+              description: exchangeError.message,
+              variant: "destructive",
+            })
+            setIsProcessing(false)
+            return
+          }
         }
 
         if (!data.session) {
@@ -66,21 +114,25 @@ export default function AuthCallbackPage() {
           return
         }
 
-        console.log("Authentication successful, session established")
-
-        // Redirect to the stored path or home
-        const redirectPath = localStorage.getItem("redirectAfterLogin") || "/"
-        localStorage.removeItem("redirectAfterLogin")
-
-        // Small delay to ensure session is properly stored
-        setTimeout(() => {
-          router.push(redirectPath)
-        }, 500)
+        handleSuccessfulLogin(data.session)
       } catch (err) {
         console.error("Unexpected error in auth callback:", err)
         setError(err instanceof Error ? err.message : "An unexpected error occurred")
         setIsProcessing(false)
       }
+    }
+
+    function handleSuccessfulLogin(session) {
+      console.log("Authentication successful, session established")
+
+      // Redirect to the stored path or home
+      const redirectPath = localStorage.getItem("redirectAfterLogin") || "/"
+      localStorage.removeItem("redirectAfterLogin")
+
+      // Small delay to ensure session is properly stored
+      setTimeout(() => {
+        router.push(redirectPath)
+      }, 500)
     }
 
     // Store current path for redirect after login if not already set
