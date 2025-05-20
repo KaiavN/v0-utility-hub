@@ -14,42 +14,21 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        console.log("Auth callback page loaded")
         setIsProcessing(true)
+        console.log("Auth callback page loaded")
 
-        // Check for error in URL
-        const errorParam = searchParams.get("error")
-        const errorDescription = searchParams.get("error_description")
-
-        if (errorParam) {
-          console.error("OAuth error:", errorParam, errorDescription)
-          setError(errorDescription || "Authentication failed")
-          toast({
-            title: "Authentication Error",
-            description: errorDescription || "There was a problem with the authentication process",
-            variant: "destructive",
-          })
-          setTimeout(() => router.push("/"), 2000)
-          return
-        }
-
-        // Get code from URL
+        // Get the code from the URL
         const code = searchParams.get("code")
+
         if (!code) {
           console.error("No code found in URL")
-          setError("No authentication code received")
-          toast({
-            title: "Authentication Error",
-            description: "No authentication code received",
-            variant: "destructive",
-          })
-          setTimeout(() => router.push("/"), 2000)
+          setError("No authentication code found")
           return
         }
 
-        console.log("Code received, exchanging for session...")
+        console.log("Code found in URL, exchanging for session")
 
-        // Initialize Supabase client
+        // Get Supabase client
         const supabase = await createSupabaseClientAsync()
 
         // Exchange code for session
@@ -60,57 +39,33 @@ export default function AuthCallbackPage() {
           setError(exchangeError.message)
           toast({
             title: "Authentication Error",
-            description: exchangeError.message || "Failed to complete authentication",
+            description: exchangeError.message,
             variant: "destructive",
           })
-          setTimeout(() => router.push("/"), 2000)
           return
         }
 
         if (!data.session) {
           console.error("No session returned after code exchange")
-          setError("Failed to establish session")
-          toast({
-            title: "Authentication Error",
-            description: "Failed to establish session",
-            variant: "destructive",
-          })
-          setTimeout(() => router.push("/"), 2000)
+          setError("Failed to create session")
           return
         }
 
-        console.log("Authentication successful, session established")
+        console.log("Successfully authenticated user")
 
         // Get redirect path from localStorage or default to home
-        let redirectPath = "/"
-        try {
-          const storedPath = localStorage.getItem("redirectAfterLogin")
-          if (storedPath) {
-            redirectPath = storedPath
-            localStorage.removeItem("redirectAfterLogin")
-          }
-        } catch (e) {
-          console.warn("Error accessing localStorage:", e)
+        let redirectTo = "/"
+        if (typeof window !== "undefined") {
+          redirectTo = localStorage.getItem("redirectAfterLogin") || "/"
+          localStorage.removeItem("redirectAfterLogin")
         }
 
-        // Show success message
-        toast({
-          title: "Authentication Successful",
-          description: "You have been successfully logged in",
-        })
-
         // Redirect to the stored path
-        console.log("Redirecting to:", redirectPath)
-        router.push(redirectPath)
+        console.log("Redirecting to:", redirectTo)
+        router.push(redirectTo)
       } catch (err) {
         console.error("Unexpected error in auth callback:", err)
-        setError("An unexpected error occurred")
-        toast({
-          title: "Authentication Error",
-          description: "An unexpected error occurred during authentication",
-          variant: "destructive",
-        })
-        setTimeout(() => router.push("/"), 2000)
+        setError(err instanceof Error ? err.message : "An unexpected error occurred")
       } finally {
         setIsProcessing(false)
       }
@@ -120,27 +75,31 @@ export default function AuthCallbackPage() {
   }, [router, searchParams])
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-lg border bg-card p-8 shadow-lg">
-        <h1 className="mb-4 text-center text-2xl font-bold">
-          {error ? "Authentication Failed" : "Completing Authentication"}
-        </h1>
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="w-full max-w-md p-8 space-y-4 bg-white rounded-lg shadow dark:bg-gray-800">
+        <h2 className="text-2xl font-bold text-center">
+          {isProcessing ? "Completing Login..." : error ? "Authentication Error" : "Login Successful"}
+        </h2>
 
-        {isProcessing && !error && (
-          <div className="flex flex-col items-center justify-center space-y-4">
-            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-t-2 border-primary"></div>
-            <p className="text-center text-muted-foreground">
-              Please wait while we complete the authentication process...
-            </p>
+        {isProcessing && (
+          <div className="flex justify-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-white"></div>
           </div>
         )}
 
         {error && (
-          <div className="rounded-md bg-destructive/10 p-4 text-center text-destructive">
+          <div className="p-4 text-red-700 bg-red-100 rounded-md dark:bg-red-900 dark:text-red-100">
             <p>{error}</p>
-            <p className="mt-2 text-sm">Redirecting you to the home page...</p>
+            <button
+              onClick={() => router.push("/login")}
+              className="mt-4 w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md"
+            >
+              Return to Login
+            </button>
           </div>
         )}
+
+        {!isProcessing && !error && <p className="text-center">Redirecting you to the application...</p>}
       </div>
     </div>
   )

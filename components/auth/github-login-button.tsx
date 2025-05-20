@@ -18,7 +18,6 @@ export function GitHubLoginButton({ className = "", variant = "default", size = 
   const [isClicked, setIsClicked] = useState(false)
   const pathname = usePathname()
 
-  // Update the handleLogin function to ensure proper redirect URL handling
   const handleLogin = async () => {
     if (isLoading || isClicked) return
 
@@ -31,10 +30,10 @@ export function GitHubLoginButton({ className = "", variant = "default", size = 
         localStorage.setItem("redirectAfterLogin", pathname || "/")
       }
 
-      // Get the site URL for proper redirect
-      const siteUrl = typeof window !== "undefined" ? window.location.origin : ""
-      const redirectUrl = `${siteUrl}/auth/callback`
-      console.log("Using redirect URL:", redirectUrl)
+      // Get the absolute URL for the callback
+      const origin = typeof window !== "undefined" ? window.location.origin : ""
+      const callbackUrl = `${origin}/auth/callback`
+      console.log("Using callback URL:", callbackUrl)
 
       await loginWithGitHub()
       // No need to reset isClicked as we'll be redirected to GitHub

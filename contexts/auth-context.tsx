@@ -236,7 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return "https://utilhub.vercel.app"
   }
 
-  // Update the loginWithGitHub function to handle the OAuth flow correctly
+  // Update the loginWithGitHub function to be more robust
   const loginWithGitHub = async (): Promise<void> => {
     try {
       setIsLoading(true)
