@@ -109,6 +109,12 @@ export async function createSupabaseClientAsync() {
           },
         },
       })
+
+      // Explicitly check for hash fragment and handle it
+      if (typeof window !== "undefined" && window.location.hash && window.location.hash.includes("access_token")) {
+        console.log("Hash fragment detected, handling auth callback")
+        supabaseInstance.auth.getSessionFromUrl()
+      }
     }
 
     return supabaseInstance

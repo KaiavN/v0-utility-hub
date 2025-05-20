@@ -17,7 +17,7 @@ interface AuthContextType {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
-  loginWithGitHub: () => Promise<void>
+  loginWithGitHub: (redirectUrl?: string) => Promise<void>
   logout: () => Promise<void>
   deleteAccount: () => Promise<boolean>
   profile: any | null
@@ -237,7 +237,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   // Update the loginWithGitHub function to be more robust
-  const loginWithGitHub = async (): Promise<void> => {
+  const loginWithGitHub = async (providedRedirectUrl?: string): Promise<void> => {
     try {
       setIsLoading(true)
 
@@ -248,10 +248,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Clear any previous auth state to ensure a clean login
         localStorage.removeItem("authError")
+        localStorage.removeItem("supabase.auth.token")
+        localStorage.removeItem("sb-access-token")
+        localStorage.removeItem("sb-refresh-token")
       }
 
+      // Get the site URL for the redirect
       const siteUrl = getSiteUrl()
-      console.log("Logging in with GitHub, redirect URL:", `${siteUrl}/auth/callback`)
+
+      // Use the provided redirectUrl or construct a default one
+      const redirectUrl = providedRedirectUrl || new URL("/auth/callback", siteUrl).toString()
+      console.log("Logging in with GitHub, redirect URL:", redirectUrl)
 
       // First, try to sign out to ensure a clean authentication state
       try {
@@ -264,9 +271,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Add a small delay to ensure signOut completes
       await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Use a consistent and absolute URL for redirectTo
-      const redirectUrl = new URL("/auth/callback", siteUrl).toString()
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",

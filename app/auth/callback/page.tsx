@@ -20,9 +20,24 @@ export default function AuthCallbackPage() {
 
         // Get the code from URL
         const code = searchParams.get("code")
+        const error = searchParams.get("error")
+        const errorDescription = searchParams.get("error_description")
+
+        console.log("Auth callback received:", {
+          hasCode: !!code,
+          error,
+          errorDescription,
+          fullUrl: typeof window !== "undefined" ? window.location.href : "server-side",
+        })
+
+        if (error) {
+          setError(`Authentication error: ${error}${errorDescription ? ` - ${errorDescription}` : ""}`)
+          setIsProcessing(false)
+          return
+        }
 
         if (!code) {
-          setError("No code provided in callback URL")
+          setError("No code provided in callback URL. Please try logging in again.")
           setIsProcessing(false)
           return
         }
@@ -83,11 +98,19 @@ export default function AuthCallbackPage() {
         <div className="w-full max-w-md p-6 bg-white rounded-lg shadow-md dark:bg-gray-800">
           <h1 className="text-xl font-semibold text-red-600 dark:text-red-400 mb-2">Authentication Failed</h1>
           <p className="text-gray-700 dark:text-gray-300 mb-4">{error}</p>
+          <div className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            <p>This could be due to:</p>
+            <ul className="list-disc pl-5 mt-2">
+              <li>An expired authentication session</li>
+              <li>Missing or invalid callback parameters</li>
+              <li>Browser cookie or storage issues</li>
+            </ul>
+          </div>
           <button
-            onClick={() => router.push("/login")}
+            onClick={() => router.push("/")}
             className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
           >
-            Try Again
+            Return to Home
           </button>
         </div>
       </div>

@@ -28,9 +28,20 @@ export function GitHubLoginButton({ className = "", variant = "default", size = 
       // Store current path for redirect after login
       if (typeof window !== "undefined") {
         localStorage.setItem("redirectAfterLogin", pathname || "/")
+
+        // Clear any existing auth state to prevent conflicts
+        localStorage.removeItem("supabase.auth.token")
+        localStorage.removeItem("sb-access-token")
+        localStorage.removeItem("sb-refresh-token")
+        sessionStorage.removeItem("supabase.auth.token")
       }
 
-      await loginWithGitHub()
+      // Get the absolute URL for the callback
+      const siteUrl = typeof window !== "undefined" ? window.location.origin : ""
+      const redirectUrl = `${siteUrl}/auth/callback`
+      console.log("Using redirect URL:", redirectUrl)
+
+      await loginWithGitHub(redirectUrl)
       // No need to reset isClicked as we'll be redirected to GitHub
     } catch (error) {
       console.error("Error in GitHub login button:", error)
