@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { GitHubLoginButton } from "./github-login-button"
-import { GoogleLoginButton } from "./google-login-button"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -117,7 +116,6 @@ export function AuthButton() {
   return (
     <div className="flex gap-2">
       <GitHubLoginButton variant="outline" size="sm" />
-      <GoogleLoginButton variant="outline" size="sm" />
     </div>
   )
 }
