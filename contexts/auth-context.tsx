@@ -183,7 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Set up auth state change listener
     const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth state changed:", event)
+      console.log("Auth state changed:", event, session?.user?.email)
 
       if (event === "SIGNED_IN" && session) {
         // User signed in
@@ -214,10 +214,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        // Show success message
+        toast({
+          title: "Welcome!",
+          description: `Successfully signed in as ${userData.email}`,
+        })
+
         // Redirect to the stored path or home
         const redirectPath = localStorage.getItem("redirectAfterLogin") || "/"
         localStorage.removeItem("redirectAfterLogin")
-        router.push(redirectPath)
+
+        // Small delay to ensure everything is processed
+        setTimeout(() => {
+          router.push(redirectPath)
+        }, 500)
       } else if (event === "SIGNED_OUT" || event === "USER_DELETED") {
         // User signed out
         console.log("User signed out event received")
@@ -225,6 +235,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null)
         setIsAuthenticated(false)
         setIsLoading(false)
+      } else if (event === "TOKEN_REFRESHED") {
+        console.log("Token refreshed")
       }
     })
 
@@ -238,16 +250,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Get the correct site URL
   const getSiteUrl = () => {
-    // Fallback to window.location.origin in the browser
     if (typeof window !== "undefined") {
       return window.location.origin
     }
 
-    // Default fallback (should not reach here in normal circumstances)
+    // Server-side fallbacks
+    if (process.env.NEXT_PUBLIC_VERCEL_URL) {
+      return `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
+    }
+
+    if (process.env.NEXT_PUBLIC_APP_URL) {
+      return process.env.NEXT_PUBLIC_APP_URL
+    }
+
+    // Default fallback
     return "https://utilhub.vercel.app"
   }
 
-  // GitHub OAuth login
+  // GitHub OAuth login - Supabase handles the code exchange
   const loginWithGitHub = async (): Promise<void> => {
     try {
       setIsLoading(true)
@@ -262,20 +282,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const siteUrl = getSiteUrl()
       console.log("Site URL:", siteUrl)
 
-      // Use a consistent and absolute URL for redirectTo
-      const redirectUrl = new URL("/auth/callback", siteUrl).toString()
+      // The redirectTo URL is where Supabase will send the user after processing the GitHub OAuth
+      const redirectUrl = `${siteUrl}/auth/callback`
       console.log("Redirect URL:", redirectUrl)
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
           redirectTo: redirectUrl,
-          // Explicitly request the scopes we need
+          // Request the scopes we need
           scopes: "read:user user:email",
-          queryParams: {
-            // Add a timestamp to prevent caching issues
-            _t: Date.now().toString(),
-          },
         },
       })
 
@@ -291,10 +307,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      console.log("OAuth response data:", data)
-
-      // The user will be redirected to GitHub, so we don't need to do anything else here
-      // The loading state will be reset when the page redirects
+      console.log("OAuth initiated successfully:", data)
+      // User will be redirected to GitHub, then to Supabase, then back to our callback
+      // Don't reset loading state here as the page will redirect
     } catch (error) {
       console.error("GitHub login unexpected error:", error)
       setAuthError(error instanceof Error ? error : new Error(String(error)))
@@ -314,17 +329,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("Starting logout process...")
 
       // Immediately update UI state to reflect logout
-      // This ensures the UI shows logged out state even if API calls take time
       setUser(null)
       setProfile(null)
       setIsAuthenticated(false)
 
       // Clear all auth-related items from localStorage
       if (typeof window !== "undefined") {
-        // Clear specific Supabase items
         const authItemPrefixes = ["sb-", "supabase-", "auth-"]
 
-        // Get all localStorage keys
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i)
           if (
@@ -335,79 +347,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.removeItem(key)
           }
         }
-
-        // Explicitly remove known items
-        const knownItems = [
-          "supabase.auth.token",
-          "supabase.auth.refreshToken",
-          "sb-access-token",
-          "sb-refresh-token",
-          "supabaseSession",
-          "authUser",
-          "sb-auth-token",
-          "sb-provider-token",
-          "sb-auth-event",
-          "sb-auth-data",
-        ]
-
-        knownItems.forEach((item) => {
-          localStorage.removeItem(item)
-        })
       }
 
-      // Try to sign out with Supabase directly first
+      // Sign out with Supabase
       try {
         console.log("Calling Supabase signOut...")
         await supabase.auth.signOut({ scope: "global" })
         console.log("Supabase signOut completed")
       } catch (supabaseError) {
         console.warn("Supabase signOut error:", supabaseError)
-        // Continue with API call regardless
-      }
-
-      // Call our API endpoint to handle server-side logout
-      console.log("Calling logout API endpoint...")
-      const response = await fetch("/api/auth/logout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // Add cache control headers
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          Pragma: "no-cache",
-        },
-        // Prevent caching
-        cache: "no-store",
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        console.warn("Logout API error:", errorData)
-        // Continue anyway - we've already cleared client-side state
-      } else {
-        console.log("Logout API call successful")
-      }
-
-      // Clear any session cookies manually as a fallback
-      if (typeof document !== "undefined") {
-        const cookiesToClear = [
-          "sb-access-token",
-          "sb-refresh-token",
-          "supabase-auth-token",
-          "__session",
-          "sb-auth-token",
-        ]
-
-        cookiesToClear.forEach((cookieName) => {
-          document.cookie = `${cookieName}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax;`
-        })
-
-        // Also try to clear any cookies without knowing their exact names
-        document.cookie.split(";").forEach((cookie) => {
-          const [name] = cookie.trim().split("=")
-          if (name && (name.includes("sb-") || name.includes("auth") || name.includes("token"))) {
-            document.cookie = `${name}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax;`
-          }
-        })
       }
 
       // Show success message
@@ -416,14 +364,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         description: "You have been successfully logged out",
       })
 
-      // Force a hard reload to clear any in-memory state
-      // This is the most reliable way to ensure complete logout
+      // Redirect to home page
       if (typeof window !== "undefined") {
         console.log("Redirecting to home page...")
         window.location.href = "/"
-        return // Stop execution here as we're reloading the page
+        return
       } else {
-        // Fallback if window is not available
         router.push("/")
       }
     } catch (error) {
@@ -467,28 +413,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(true)
 
       // First, delete user data from the database
-      // 1. Delete messages
       const { error: messagesError } = await supabase.from("messages").delete().eq("sender_id", user.id)
-
       if (messagesError) {
         console.error("Error deleting messages:", messagesError)
         throw new Error(messagesError.message)
       }
 
-      // 2. Delete conversation participants
       const { error: participantsError } = await supabase
         .from("conversation_participants")
         .delete()
         .eq("user_id", user.id)
-
       if (participantsError) {
         console.error("Error deleting conversation participants:", participantsError)
         throw new Error(participantsError.message)
       }
 
-      // 3. Delete profile
       const { error: profileError } = await supabase.from("profiles").delete().eq("id", user.id)
-
       if (profileError) {
         console.error("Error deleting profile:", profileError)
         throw new Error(profileError.message)
@@ -496,7 +436,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Finally, delete the user account
       const { error: deleteError } = await supabase.auth.admin.deleteUser(user.id)
-
       if (deleteError) {
         console.error("Error deleting user:", deleteError)
         throw new Error(deleteError.message)
@@ -515,7 +454,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         description: "Your account has been successfully deleted",
       })
 
-      // Redirect to home page
       router.push("/")
       return true
     } catch (error) {

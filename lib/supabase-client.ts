@@ -90,14 +90,14 @@ export async function createSupabaseClientAsync() {
           storageKey: "sb-auth-token",
           flowType: "pkce",
           detectSessionInUrl: true,
-          // Specify cookie options carefully
+          // Configure for OAuth flow
           cookieOptions: {
-            secure: typeof window !== "undefined" && window.location.protocol === "https:",
+            secure: window.location.protocol === "https:",
             sameSite: "Lax",
             path: "/",
           },
         },
-        // Completely disable realtime
+        // Disable realtime for better performance
         realtime: {
           enabled: false,
         },
@@ -147,8 +147,9 @@ export function createSupabaseClient() {
           auth: {
             persistSession: true,
             autoRefreshToken: true,
+            detectSessionInUrl: true,
+            flowType: "pkce",
           },
-          // Completely disable realtime
           realtime: {
             enabled: false,
           },
@@ -174,8 +175,9 @@ export function createSupabaseClient() {
             auth: {
               persistSession: true,
               autoRefreshToken: true,
+              detectSessionInUrl: true,
+              flowType: "pkce",
             },
-            // Completely disable realtime
             realtime: {
               enabled: false,
             },
