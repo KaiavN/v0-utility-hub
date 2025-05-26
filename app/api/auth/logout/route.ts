@@ -15,7 +15,7 @@ export async function POST() {
 
     if (error) {
       console.error("API: /auth/logout - Error signing out:", error.message)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      // Don't return error immediately, continue with cookie cleanup
     }
 
     // Prepare response
@@ -38,13 +38,14 @@ export async function POST() {
         name.includes("auth") ||
         name.includes("token")
       ) {
-        response.cookies.delete(name)
-
-        // Also set an expired version of the cookie
-        response.headers.append(
-          "Set-Cookie",
-          `${name}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax`,
-        )
+        // Delete the cookie
+        response.cookies.set(name, "", {
+          path: "/",
+          expires: new Date(0),
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+        })
       }
     })
 
@@ -60,22 +61,44 @@ export async function POST() {
     ]
 
     knownCookies.forEach((name) => {
-      response.cookies.delete(name)
-      response.headers.append(
-        "Set-Cookie",
-        `${name}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax`,
-      )
+      response.cookies.set(name, "", {
+        path: "/",
+        expires: new Date(0),
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+      })
     })
 
     // Add cache control headers to prevent caching of this response
-    response.headers.append("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
-    response.headers.append("Pragma", "no-cache")
-    response.headers.append("Expires", "0")
+    response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+    response.headers.set("Pragma", "no-cache")
+    response.headers.set("Expires", "0")
 
     console.log("API: /auth/logout - Logout successful")
     return response
   } catch (error) {
     console.error("API: /auth/logout - Unexpected error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+
+    // Even if there's an error, return success to ensure client-side cleanup happens
+    const response = NextResponse.json({
+      success: true,
+      message: "Logout completed with warnings",
+    })
+
+    // Still try to clear cookies
+    const knownCookies = ["sb-access-token", "sb-refresh-token", "supabase-auth-token", "sb-auth-token"]
+
+    knownCookies.forEach((name) => {
+      response.cookies.set(name, "", {
+        path: "/",
+        expires: new Date(0),
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+      })
+    })
+
+    return response
   }
 }

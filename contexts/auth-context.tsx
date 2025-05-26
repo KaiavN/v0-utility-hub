@@ -219,15 +219,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           title: "Welcome!",
           description: `Successfully signed in as ${userData.email}`,
         })
-
-        // Redirect to the stored path or home
-        const redirectPath = localStorage.getItem("redirectAfterLogin") || "/"
-        localStorage.removeItem("redirectAfterLogin")
-
-        // Small delay to ensure everything is processed
-        setTimeout(() => {
-          router.push(redirectPath)
-        }, 500)
       } else if (event === "SIGNED_OUT" || event === "USER_DELETED") {
         // User signed out
         console.log("User signed out event received")
@@ -325,28 +316,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Comprehensive logout function that ensures complete session termination
   const logout = async () => {
     try {
-      setIsLoading(true)
       console.log("Starting logout process...")
 
       // Immediately update UI state to reflect logout
       setUser(null)
       setProfile(null)
       setIsAuthenticated(false)
+      setIsLoading(true)
 
-      // Clear all auth-related items from localStorage
+      // Clear localStorage immediately
       if (typeof window !== "undefined") {
-        const authItemPrefixes = ["sb-", "supabase-", "auth-"]
+        console.log("Clearing localStorage...")
 
+        // Get all keys first to avoid issues with changing storage during iteration
+        const keysToRemove: string[] = []
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i)
           if (
             key &&
-            (authItemPrefixes.some((prefix) => key.startsWith(prefix)) || key.includes("auth") || key.includes("token"))
+            (key.startsWith("sb-") ||
+              key.startsWith("supabase-") ||
+              key.startsWith("auth-") ||
+              key.includes("auth") ||
+              key.includes("token"))
           ) {
-            console.log(`Clearing localStorage item: ${key}`)
-            localStorage.removeItem(key)
+            keysToRemove.push(key)
           }
         }
+
+        // Remove all auth-related keys
+        keysToRemove.forEach((key) => {
+          console.log(`Clearing localStorage item: ${key}`)
+          localStorage.removeItem(key)
+        })
+
+        // Explicitly remove known items
+        const knownItems = [
+          "supabase.auth.token",
+          "supabase.auth.refreshToken",
+          "sb-access-token",
+          "sb-refresh-token",
+          "supabaseSession",
+          "authUser",
+          "sb-auth-token",
+          "sb-provider-token",
+          "sb-auth-event",
+          "sb-auth-data",
+          "redirectAfterLogin",
+        ]
+
+        knownItems.forEach((item) => {
+          localStorage.removeItem(item)
+        })
+      }
+
+      // Clear sessionStorage as well
+      if (typeof window !== "undefined" && window.sessionStorage) {
+        console.log("Clearing sessionStorage...")
+        const sessionKeysToRemove: string[] = []
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i)
+          if (
+            key &&
+            (key.startsWith("sb-") || key.startsWith("supabase-") || key.includes("auth") || key.includes("token"))
+          ) {
+            sessionKeysToRemove.push(key)
+          }
+        }
+        sessionKeysToRemove.forEach((key) => sessionStorage.removeItem(key))
       }
 
       // Sign out with Supabase
@@ -356,6 +393,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log("Supabase signOut completed")
       } catch (supabaseError) {
         console.warn("Supabase signOut error:", supabaseError)
+        // Continue with API call regardless
+      }
+
+      // Call our API endpoint to handle server-side logout
+      try {
+        console.log("Calling logout API endpoint...")
+        const response = await fetch("/api/auth/logout", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            Pragma: "no-cache",
+          },
+          cache: "no-store",
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          console.warn("Logout API error:", errorData)
+        } else {
+          console.log("Logout API call successful")
+        }
+      } catch (apiError) {
+        console.warn("Logout API call failed:", apiError)
+        // Continue anyway
+      }
+
+      // Clear any session cookies manually as a fallback
+      if (typeof document !== "undefined") {
+        console.log("Clearing cookies...")
+        const cookiesToClear = [
+          "sb-access-token",
+          "sb-refresh-token",
+          "supabase-auth-token",
+          "__session",
+          "sb-auth-token",
+          "sb-provider-token",
+          "sb-auth-event",
+          "sb-auth-data",
+        ]
+
+        cookiesToClear.forEach((cookieName) => {
+          // Clear for current domain
+          document.cookie = `${cookieName}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax;`
+          // Clear for subdomain
+          document.cookie = `${cookieName}=; Path=/; Domain=${window.location.hostname}; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax;`
+        })
       }
 
       // Show success message
@@ -364,11 +448,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         description: "You have been successfully logged out",
       })
 
-      // Redirect to home page
+      console.log("Logout process completed, redirecting...")
+
+      // Force a hard reload to clear any in-memory state
       if (typeof window !== "undefined") {
-        console.log("Redirecting to home page...")
-        window.location.href = "/"
-        return
+        // Use replace to avoid back button issues
+        window.location.replace("/")
       } else {
         router.push("/")
       }
@@ -389,7 +474,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Redirect to home page anyway
       if (typeof window !== "undefined") {
-        window.location.href = "/"
+        window.location.replace("/")
       } else {
         router.push("/")
       }
