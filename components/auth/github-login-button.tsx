@@ -24,10 +24,14 @@ export function GitHubLoginButton({ className = "", variant = "default", size = 
     try {
       setIsClicked(true)
       console.log("GitHub login button clicked")
+      console.log("Current pathname:", pathname)
+      console.log("Window location:", window.location.href)
 
       // Store current path for redirect after login
       if (typeof window !== "undefined") {
-        localStorage.setItem("redirectAfterLogin", pathname || "/")
+        const redirectPath = pathname !== "/login" ? pathname : "/"
+        localStorage.setItem("redirectAfterLogin", redirectPath)
+        console.log("Stored redirect path:", redirectPath)
       }
 
       await loginWithGitHub()

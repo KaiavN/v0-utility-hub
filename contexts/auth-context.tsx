@@ -256,15 +256,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (typeof window !== "undefined") {
         const currentPath = window.location.pathname
         localStorage.setItem("redirectAfterLogin", currentPath !== "/login" ? currentPath : "/")
+        console.log("Stored redirect path:", currentPath)
       }
 
       const siteUrl = getSiteUrl()
-      console.log("Logging in with GitHub, redirect URL:", `${siteUrl}/auth/callback`)
+      console.log("Site URL:", siteUrl)
 
       // Use a consistent and absolute URL for redirectTo
       const redirectUrl = new URL("/auth/callback", siteUrl).toString()
+      console.log("Redirect URL:", redirectUrl)
 
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
           redirectTo: redirectUrl,
@@ -286,7 +288,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           variant: "destructive",
         })
         setIsLoading(false)
+        return
       }
+
+      console.log("OAuth response data:", data)
+
+      // The user will be redirected to GitHub, so we don't need to do anything else here
+      // The loading state will be reset when the page redirects
     } catch (error) {
       console.error("GitHub login unexpected error:", error)
       setAuthError(error instanceof Error ? error : new Error(String(error)))

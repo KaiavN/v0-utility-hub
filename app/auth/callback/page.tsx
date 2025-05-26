@@ -14,28 +14,52 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     async function handleAuthCallback() {
       try {
+        console.log("Auth callback page loaded")
+        console.log("Current URL:", window.location.href)
+        console.log("Search params:", window.location.search)
+
         // Make sure Supabase client is initialized
         await initSupabaseClient()
         const supabase = getSupabaseClient()
 
-        // Get the code from URL
-        const code = searchParams.get("code")
-        const provider = searchParams.get("provider") || "unknown"
+        // Get all URL parameters for debugging
+        const urlParams = new URLSearchParams(window.location.search)
+        console.log("All URL parameters:", Object.fromEntries(urlParams.entries()))
 
-        if (!code) {
-          setError("No code provided in callback URL")
+        // Get the code from URL - try multiple parameter names
+        const code = searchParams.get("code") || urlParams.get("code")
+        const error_code = searchParams.get("error") || urlParams.get("error")
+        const error_description = searchParams.get("error_description") || urlParams.get("error_description")
+
+        console.log("Code from URL:", code)
+        console.log("Error from URL:", error_code)
+        console.log("Error description:", error_description)
+
+        // Check for OAuth errors first
+        if (error_code) {
+          const errorMsg = error_description || error_code || "OAuth authentication failed"
+          console.error("OAuth error:", errorMsg)
+          setError(errorMsg)
           setIsProcessing(false)
           return
         }
 
-        console.log(`Processing ${provider} auth callback with code`)
+        if (!code) {
+          console.error("No code found in URL parameters")
+          console.log("Available search params:", Array.from(searchParams.entries()))
+          setError("No authorization code received from GitHub. Please try logging in again.")
+          setIsProcessing(false)
+          return
+        }
+
+        console.log("Processing GitHub auth callback with code:", code.substring(0, 10) + "...")
 
         // Exchange code for session
         const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
 
         if (exchangeError) {
           console.error("Error exchanging code for session:", exchangeError)
-          setError(exchangeError.message)
+          setError(`Authentication failed: ${exchangeError.message}`)
           toast({
             title: "Authentication Error",
             description: exchangeError.message,
@@ -47,21 +71,23 @@ export default function AuthCallbackPage() {
 
         if (!data.session) {
           console.error("No session returned after code exchange")
-          setError("Unable to establish a session. Please try again.")
+          setError("Failed to create session. Please try logging in again.")
           setIsProcessing(false)
           return
         }
 
         console.log("Authentication successful, session established")
+        console.log("User:", data.session.user.email)
 
         // Redirect to the stored path or home
         const redirectPath = localStorage.getItem("redirectAfterLogin") || "/"
         localStorage.removeItem("redirectAfterLogin")
+        console.log("Redirecting to:", redirectPath)
 
         // Small delay to ensure session is properly stored
         setTimeout(() => {
           router.push(redirectPath)
-        }, 500)
+        }, 1000)
       } catch (err) {
         console.error("Unexpected error in auth callback:", err)
         setError(err instanceof Error ? err.message : "An unexpected error occurred")
