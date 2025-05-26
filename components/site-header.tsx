@@ -33,7 +33,6 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getLocalStorage } from "@/lib/local-storage"
-import { AuthDebug } from "@/components/auth/auth-debug"
 
 interface SiteHeaderProps {
   onSettingsUpdate: (settings: any) => void
@@ -109,20 +108,11 @@ export function SiteHeader({ onSettingsUpdate }: SiteHeaderProps) {
         <div className="container h-full flex items-center justify-between">
           <div className="flex h-full items-center">
             <SidebarTrigger className="mr-2 md:hidden sidebar-nav" />
-            {/* {!isMobile && (
-              <div className="flex items-center gap-2">
-                <Button variant="ghost" size="sm" className="gap-1 search-input" onClick={() => setIsSearchOpen(true)}>
-                  <Search className="h-4 w-4" />
-                  <span>Search</span>
-                </Button>
-              </div>
-            )} */}
           </div>
 
           {/* Right-aligned help and tutorials */}
           {!isMobile && (
             <div className="flex items-center gap-2">
-              {process.env.NODE_ENV !== "production" && <AuthDebug />}
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>

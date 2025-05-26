@@ -14,9 +14,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { Loader2, CheckCircle } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
-import { useToast } from "@/components/ui/use-toast"
-import { Loader2 } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface ForgotPasswordModalProps {
   open: boolean
@@ -27,114 +27,111 @@ interface ForgotPasswordModalProps {
 export function ForgotPasswordModal({ open, onOpenChange, onSwitchToLogin }: ForgotPasswordModalProps) {
   const [email, setEmail] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const [isSubmitted, setIsSubmitted] = useState(false)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState(false)
   const { resetPassword } = useAuth()
-  const { toast } = useToast()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError("")
+    setSuccess(false)
 
     if (!email.trim()) {
-      toast({
-        title: "Email Required",
-        description: "Please enter your email address",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(email)) {
-      toast({
-        title: "Invalid Email",
-        description: "Please enter a valid email address",
-        variant: "destructive",
-      })
+      setError("Email is required")
       return
     }
 
     setIsLoading(true)
 
     try {
-      const success = await resetPassword(email)
-
-      if (success) {
-        setIsSubmitted(true)
+      const result = await resetPassword(email)
+      if (result) {
+        setSuccess(true)
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Password reset error:", error)
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive",
-      })
+      setError(error?.message || "An error occurred. Please try again.")
     } finally {
       setIsLoading(false)
     }
   }
 
-  const handleClose = () => {
+  const resetForm = () => {
     setEmail("")
-    setIsSubmitted(false)
-    onOpenChange(false)
+    setError("")
+    setSuccess(false)
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <Dialog
+      open={open}
+      onOpenChange={(newOpen) => {
+        if (!newOpen) {
+          resetForm()
+        }
+        onOpenChange(newOpen)
+      }}
+    >
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Reset Password</DialogTitle>
-          <DialogDescription>
-            {isSubmitted
-              ? "Check your email for a link to reset your password"
-              : "Enter your email address and we'll send you a link to reset your password"}
-          </DialogDescription>
+          <DialogDescription>Enter your email to receive a password reset link</DialogDescription>
         </DialogHeader>
-        {!isSubmitted ? (
-          <form onSubmit={handleSubmit}>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your email"
-                  autoComplete="email"
-                />
-              </div>
-            </div>
-            <DialogFooter className="flex flex-col sm:flex-col gap-2">
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Sending...
-                  </>
-                ) : (
-                  "Send Reset Link"
+        <form onSubmit={handleSubmit}>
+          <div className="grid gap-4 py-4">
+            {success ? (
+              <Alert className="bg-green-50 border-green-200">
+                <CheckCircle className="h-4 w-4 text-green-600 mr-2" />
+                <AlertDescription className="text-green-800">
+                  Password reset link sent! Check your email for instructions.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="reset-email">Email</Label>
+                  <Input
+                    id="reset-email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Enter your email"
+                    autoComplete="email"
+                    required
+                  />
+                </div>
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
                 )}
-              </Button>
-              <Button type="button" variant="outline" onClick={onSwitchToLogin} className="w-full">
+              </>
+            )}
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-col gap-2">
+            {success ? (
+              <Button type="button" onClick={onSwitchToLogin} className="w-full">
                 Back to Login
               </Button>
-            </DialogFooter>
-          </form>
-        ) : (
-          <div className="py-4">
-            <p className="mb-4">
-              We've sent a password reset link to <strong>{email}</strong>. Please check your email and follow the
-              instructions to reset your password.
-            </p>
-            <p className="mb-4 text-sm text-muted-foreground">
-              If you don't see the email, check your spam folder or try again.
-            </p>
-            <Button onClick={onSwitchToLogin} className="w-full">
-              Back to Login
-            </Button>
-          </div>
-        )}
+            ) : (
+              <>
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    "Send Reset Link"
+                  )}
+                </Button>
+                <Button type="button" variant="outline" onClick={onSwitchToLogin} className="w-full">
+                  Back to Login
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

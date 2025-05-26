@@ -12,7 +12,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { GitHubLoginButton } from "./github-login-button"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { GitHubLoginButton } from "./github-login-button"
 
 export function AuthButton() {
   const { user, logout, deleteAccount } = useAuth()
@@ -115,3 +115,6 @@ export function AuthButton() {
 
   return <GitHubLoginButton variant="outline" size="sm" />
 }
+
+// Also export as default for compatibility
+export default AuthButton

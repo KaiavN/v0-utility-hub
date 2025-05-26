@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { toast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
-import { getSupabaseClient, initSupabaseClient } from "@/lib/supabase-client"
+import { getSupabaseClient } from "@/lib/supabase-client"
 
 // Simplified User type
 type User = {
@@ -23,7 +23,6 @@ interface AuthContextType {
   profile: any | null
   updateProfile: (data: any) => Promise<boolean>
   debugAuthState: () => any
-  refreshSession: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -113,60 +112,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null
   }
 
-  // Function to refresh the session
-  const refreshSession = async () => {
-    try {
-      console.log("Manually refreshing session")
-      setIsLoading(true)
-
-      // Make sure Supabase client is initialized
-      await initSupabaseClient()
-
-      // Get the current session
-      const { data, error } = await supabase.auth.getSession()
-
-      if (error) {
-        console.error("Error refreshing session:", error)
-        throw error
-      }
-
-      if (data.session) {
-        console.log("Session found during refresh")
-        const userData: User = {
-          id: data.session.user.id,
-          email: data.session.user.email || "",
-          name: data.session.user.user_metadata?.name || data.session.user.user_metadata?.full_name || "",
-          avatarUrl: data.session.user.user_metadata?.avatar_url || "",
-        }
-
-        setUser(userData)
-        setIsAuthenticated(true)
-
-        // Ensure profile exists
-        await ensureUserProfile(userData)
-
-        toast({
-          title: "Session Refreshed",
-          description: "Your session has been refreshed successfully",
-        })
-      } else {
-        console.log("No session found during refresh")
-        setUser(null)
-        setProfile(null)
-        setIsAuthenticated(false)
-      }
-    } catch (error) {
-      console.error("Error in refreshSession:", error)
-      toast({
-        title: "Session Refresh Failed",
-        description: "Failed to refresh your session. Please try logging in again.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
   // Load user data on initial mount
   useEffect(() => {
     const loadUser = async () => {
@@ -175,9 +120,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         console.log("Checking authentication state...")
-
-        // Initialize Supabase client
-        await initSupabaseClient()
 
         // Check if we have a session
         const {
@@ -261,11 +203,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Ensure profile exists
         await ensureUserProfile(userData)
 
-        // Show success toast
-        toast({
-          title: "Logged In",
-          description: `Welcome${userData.name ? `, ${userData.name}` : ""}!`,
-        })
+        // If this is a GitHub login, ensure the profile is created properly
+        if (session.user.app_metadata?.provider === "github") {
+          try {
+            // Import dynamically to avoid circular dependencies
+            const { ensureGitHubUserProfile } = await import("@/lib/github-profile-helper")
+            await ensureGitHubUserProfile(session.user.id)
+          } catch (error) {
+            console.error("Error ensuring GitHub user profile:", error)
+          }
+        }
 
         // Redirect to the stored path or home
         const redirectPath = localStorage.getItem("redirectAfterLogin") || "/"
@@ -300,7 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return "https://utilhub.vercel.app"
   }
 
-  // Update the loginWithGitHub function to be more robust
+  // GitHub OAuth login
   const loginWithGitHub = async (): Promise<void> => {
     try {
       setIsLoading(true)
@@ -309,32 +256,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (typeof window !== "undefined") {
         const currentPath = window.location.pathname
         localStorage.setItem("redirectAfterLogin", currentPath !== "/login" ? currentPath : "/")
-        console.log("Stored redirect path in loginWithGitHub:", localStorage.getItem("redirectAfterLogin"))
       }
 
       const siteUrl = getSiteUrl()
-      const redirectUrl = new URL("/auth/callback", siteUrl).toString()
-      console.log("Logging in with GitHub, redirect URL:", redirectUrl)
-
-      // First, try to sign out to ensure a clean authentication state
-      try {
-        await supabase.auth.signOut({ scope: "local" })
-        console.log("Signed out before GitHub login")
-      } catch (signOutError) {
-        console.warn("Error signing out before GitHub login:", signOutError)
-        // Continue anyway
-      }
-
-      // Add a small delay to ensure signOut completes
-      await new Promise((resolve) => setTimeout(resolve, 300))
+      console.log("Logging in with GitHub, redirect URL:", `${siteUrl}/auth/callback`)
 
       // Use a consistent and absolute URL for redirectTo
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const redirectUrl = new URL("/auth/callback", siteUrl).toString()
+
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
           redirectTo: redirectUrl,
           // Explicitly request the scopes we need
           scopes: "read:user user:email",
+          queryParams: {
+            // Add a timestamp to prevent caching issues
+            _t: Date.now().toString(),
+          },
         },
       })
 
@@ -344,23 +283,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         toast({
           title: "Login Failed",
           description: error.message || "Failed to login with GitHub",
-          variant: "destructive",
-        })
-        setIsLoading(false)
-        return
-      }
-
-      // Log the URL that the user will be redirected to
-      if (data?.url) {
-        console.log("User will be redirected to:", data.url)
-
-        // Redirect the user to the GitHub OAuth URL
-        window.location.href = data.url
-      } else {
-        console.warn("No redirect URL returned from signInWithOAuth")
-        toast({
-          title: "Login Failed",
-          description: "Failed to start GitHub login process. Please try again.",
           variant: "destructive",
         })
         setIsLoading(false)
@@ -675,7 +597,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         deleteAccount,
         updateProfile,
         debugAuthState,
-        refreshSession,
       }}
     >
       {children}

@@ -27,18 +27,11 @@ export function GitHubLoginButton({ className = "", variant = "default", size = 
 
       // Store current path for redirect after login
       if (typeof window !== "undefined") {
-        const currentPath = window.location.pathname
-        localStorage.setItem("redirectAfterLogin", currentPath !== "/login" ? currentPath : "/")
-        console.log("Stored redirect path:", localStorage.getItem("redirectAfterLogin"))
+        localStorage.setItem("redirectAfterLogin", pathname || "/")
       }
 
-      // Get the absolute URL for the callback
-      const origin = typeof window !== "undefined" ? window.location.origin : ""
-      const callbackUrl = `${origin}/auth/callback`
-      console.log("Using callback URL:", callbackUrl)
-
       await loginWithGitHub()
-      // No need to reset isClicked as we'll be redirected to GitHub
+      // Note: We don't reset isClicked here because the page will redirect
     } catch (error) {
       console.error("Error in GitHub login button:", error)
       toast({
@@ -63,3 +56,6 @@ export function GitHubLoginButton({ className = "", variant = "default", size = 
     </Button>
   )
 }
+
+// Also export as default for compatibility
+export default GitHubLoginButton
